@@ -31,7 +31,7 @@ export default function LoginScreen() {
       <View className="items-center gap-8 px-8" style={{ width: '100%', maxWidth: 340 }}>
         <LogoMark size={120} />
         <Text size="2xl" weight="bold" className="text-center">
-          Welcome to Zero
+          Welcome to Null
         </Text>
         <Button
           fullWidth

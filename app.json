@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Zero",
-    "slug": "Zero",
+    "name": "Null",
+    "slug": "Null",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "zero",
+    "scheme": "null",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": {
