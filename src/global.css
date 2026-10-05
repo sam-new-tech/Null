@@ -1,3 +1,29 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import 'panelui-native/theme.css';
+
+@source '../node_modules/panelui-native/src';
+
+/* AMOLED dark: pure-black canvas, surfaces stepped up from #000.
+   Partial override — every other dark token (foreground, primary,
+   status, charts, syntax, radius) is inherited from panelui-native. */
+@layer theme {
+  :root {
+    @variant dark {
+      --color-background: #000000;
+      --color-card: #0a0a0a;
+      --color-popover: #0e0e0e;
+      --color-overlay: #131313;
+      --color-surface: #0a0a0a;
+      --color-surface-secondary: #101010;
+      --color-surface-tertiary: #161616;
+      --color-border: rgba(255, 255, 255, 0.09);
+      --color-input: rgba(255, 255, 255, 0.12);
+      --color-skeleton: rgba(255, 255, 255, 0.14);
+    }
+  }
+}
+
 :root {
   --font-display:
     Spline Sans, Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji,
