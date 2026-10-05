@@ -11,12 +11,12 @@
   :root {
     @variant dark {
       --color-background: #000000;
-      --color-card: #0a0a0a;
-      --color-popover: #0e0e0e;
-      --color-overlay: #131313;
-      --color-surface: #0a0a0a;
-      --color-surface-secondary: #101010;
-      --color-surface-tertiary: #161616;
+      --color-card: #000000;
+      --color-popover: #000000;
+      --color-overlay: #080808;
+      --color-surface: #000000;
+      --color-surface-secondary: #0a0a0a;
+      --color-surface-tertiary: #101010;
       --color-border: rgba(255, 255, 255, 0.09);
       --color-input: rgba(255, 255, 255, 0.12);
       --color-skeleton: rgba(255, 255, 255, 0.14);

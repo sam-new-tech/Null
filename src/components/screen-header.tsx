@@ -1,0 +1,34 @@
+import type { ReactNode } from 'react';
+import { View } from 'react-native';
+import { Image } from 'expo-image';
+
+import { Text } from 'panelui-native/primitives/text';
+
+export function LogoMark({ size = 72 }: { size?: number }) {
+  return (
+    <Image
+      source={require('@/assets/images/logo-mark.png')}
+      style={{ width: size, height: size, borderRadius: size * 0.27 }}
+      contentFit="cover"
+    />
+  );
+}
+
+/**
+ * Shared tab-screen header: title (or action) on the left,
+ * logo always on the right near the corner.
+ */
+export function ScreenHeader({ title, action }: { title?: string; action?: ReactNode }) {
+  return (
+    <View className="flex-row items-center justify-between">
+      {title ? (
+        <Text size="xl" weight="bold">
+          {title}
+        </Text>
+      ) : (
+        <View>{action}</View>
+      )}
+      <LogoMark />
+    </View>
+  );
+}

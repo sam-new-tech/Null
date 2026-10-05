@@ -1,15 +1,29 @@
 import '../global.css';
 
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, router, Slot, ThemeProvider, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { PanelUIProvider } from 'panelui-native/provider';
 import { useThemeMode } from 'panelui-native/theme';
 import { useCSSVariable } from 'uniwind';
+import { useEffect } from 'react';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { AuthProvider, useAuth } from '@/context/auth';
 
 SplashScreen.preventAutoHideAsync();
+
+function AuthGuard() {
+  const { connected } = useAuth();
+  const segments = useSegments();
+
+  useEffect(() => {
+    const inAuth = segments[0] === '(auth)';
+    if (!connected && !inAuth) router.replace('/(auth)/login');
+    else if (connected && inAuth) router.replace('/(tabs)');
+  }, [connected, segments]);
+
+  return <Slot />;
+}
 
 function ThemedNavigation() {
   const { mode } = useThemeMode();
@@ -36,15 +50,17 @@ function ThemedNavigation() {
         },
       }}>
       <AnimatedSplashOverlay />
-      <AppTabs />
+      <AuthGuard />
     </ThemeProvider>
   );
 }
 
 export default function RootLayout() {
   return (
-    <PanelUIProvider>
-      <ThemedNavigation />
-    </PanelUIProvider>
+    <AuthProvider>
+      <PanelUIProvider>
+        <ThemedNavigation />
+      </PanelUIProvider>
+    </AuthProvider>
   );
 }
