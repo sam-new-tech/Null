@@ -109,7 +109,7 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
     return (
       <Card className="rounded-full">
         <Card.Content className="items-center py-4">
-          <Text muted>No open positions</Text>
+          <Text muted>No active positions</Text>
         </Card.Content>
       </Card>
     );
