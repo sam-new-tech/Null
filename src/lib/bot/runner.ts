@@ -217,7 +217,7 @@ class BotRunner {
     return closed.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
   }
 
-  /** Start the bot: build the grid from live ATR and place the 16 limits. */
+  /** Start the bot: build the grid from live ATR and place the 20 limits. */
   async start(riskPct: number): Promise<void> {
     await this.load();
     if (this.persisted.state === 'running') return;
@@ -247,18 +247,18 @@ class BotRunner {
 
     const bars = await this.fetchBars(symbolId);
     const lastBar = bars[bars.length - 1];
-    const grid = buildGrid(bars, 14, 1.5, 8);
+    const grid = buildGrid(bars, 10, 1.9, 10);
     // Width guard: refuse grids narrower than one M15 bar (escape-churn trap).
-    if (lastBar.high - lastBar.low > grid.step * 8) {
+    if (lastBar.high - lastBar.low > grid.step * 10) {
       throw new Error(
-        `Grid too narrow for current volatility (bar $${(lastBar.high - lastBar.low).toFixed(2)} > range $${(grid.step * 8).toFixed(2)}) — try again later`,
+        `Grid too narrow for current volatility (bar $${(lastBar.high - lastBar.low).toFixed(2)} > range $${(grid.step * 10).toFixed(2)}) — try again later`,
       );
     }
-    const atr = grid.step / 1.5;
+    const atr = grid.step / 1.9;
     const marginPerLevel = (account.equity * riskPct) / 100;
     let volumeLots = lotsFor(marginPerLevel, lastBar.close, leverage, XAUUSD_UNITS_PER_LOT);
-    // Hard cap: 16 max-open levels must fit in free margin with headroom.
-    const maxByMargin = account.freeMargin / (16 * ((lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage));
+    // Hard cap: 20 max-open levels must fit in free margin with headroom.
+    const maxByMargin = account.freeMargin / (20 * ((lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage));
     volumeLots = Math.max(0.01, Math.min(volumeLots, Math.floor(maxByMargin * 100) / 100));
     if (volumeLots < 0.01) throw new Error('Free margin too low for one level');
 
@@ -311,7 +311,7 @@ class BotRunner {
     try {
       await this.reconcile();
       const resting = this.persisted.managedOrders.length;
-      this.log('info', resting > 0 ? `${resting}/16 resting confirmed at broker` : 'Broker shows no resting limits — check rejections above');
+      this.log('info', resting > 0 ? `${resting}/20 resting confirmed at broker` : 'Broker shows no resting limits — check rejections above');
       this.emit();
     } catch {
       // Reconcile loop covers it.
@@ -441,7 +441,7 @@ class BotRunner {
     const p = this.persisted;
     if (!p.grid) return;
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    // Stagger placements ~250ms apart: 16 at once trips the server rate limit.
+    // Stagger placements ~250ms apart: 20 at once trips the server rate limit.
     for (const L of p.grid.lower) {
       await this.place('buy', L, L + p.grid.step, L - 8 * p.grid.step);
       await sleep(250);
@@ -525,19 +525,19 @@ class BotRunner {
     const bars = await this.fetchBars(p.symbolId);
     const lastBar = bars[bars.length - 1];
     // Widen until the grid covers one M15 bar (max mult 3.0), else keep old grid.
-    let grid = buildGrid(bars, 14, 1.5, 8);
-    for (const mult of [2.0, 2.5, 3.0]) {
-      if (lastBar.high - lastBar.low <= grid.step * 8) break;
-      grid = buildGrid(bars, 14, mult, 8);
+    let grid = buildGrid(bars, 10, 1.9, 10);
+    for (const mult of [2.2, 2.6, 3.0]) {
+      if (lastBar.high - lastBar.low <= grid.step * 10) break;
+      grid = buildGrid(bars, 10, mult, 10);
     }
-    if (lastBar.high - lastBar.low > grid.step * 8) {
+    if (lastBar.high - lastBar.low > grid.step * 10) {
       this.log('error', 'Volatility too high — keeping old grid instead of churning');
       return;
     }
     this.persisted = {
       ...p,
       grid,
-      atr: grid.step / 1.5,
+      atr: grid.step / 1.9,
       managedOrders: [],
       managedPositions: [],
     };
