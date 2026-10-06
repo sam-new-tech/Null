@@ -7,11 +7,12 @@ import { unitsPerLot } from '@/lib/ctrader/orders';
  * Live cTrader data when the engine is connected, mock feed otherwise,
  * identical shapes either way so screens never change.
  */
-export function useTrading(): MockAccount {
+export function useTrading(): MockAccount & { live: boolean } {
   const live = useLive();
   const mock = useMockAccount();
+  const isLive = live.status === 'ready' && live.trader !== null;
 
-  if (live.status === 'ready' && live.trader) {
+  if (isLive) {
     const symbols = live.symbols;
     const nameOf = (id: number) => symbols.get(id)?.symbolName ?? `#${id}`;
     const lotsOf = (symbolId: number, volume: number) =>
@@ -67,8 +68,9 @@ export function useTrading(): MockAccount {
       positions,
       orders,
       history,
+      live: true,
     };
   }
 
-  return mock;
+  return { ...mock, live: false };
 }

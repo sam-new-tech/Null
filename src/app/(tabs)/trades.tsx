@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
 import { PositionsCard } from '@/components/home/positions-card';
-import { ScreenHeader } from '@/components/screen-header';
+import { LiveBadge, ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
-import { useLive } from '@/lib/ctrader/live';
+import { liveEngine } from '@/lib/ctrader/live';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
@@ -63,16 +63,29 @@ function OrderRow({ order, last }: {
 }
 
 export default function TradesScreen() {
-  const { positions, orders } = useTrading();
-  const live = useLive();
+  const { positions, orders, live } = useTrading();
   const [tab, setTab] = useState<Tab>('positions');
+  const [refreshing, setRefreshing] = useState(false);
   const total = positions.reduce((sum, p) => sum + p.pl, 0);
   const up = total >= 0;
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await liveEngine.refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
-    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+    <ScrollView
+      style={{ flex: 1, minHeight: 0 }}
+      contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
       <View className="gap-4 p-4">
         <ScreenHeader title="Trades" />
+        <LiveBadge live={live} />
         <View className="flex-row gap-2">
           {(['positions', 'orders'] as Tab[]).map((t) => {
             const active = tab === t;
@@ -97,7 +110,7 @@ export default function TradesScreen() {
 
         {tab === 'positions' ? (
           <>
-            <PositionsCard positions={positions} allowClose={live.status === 'ready'} />
+            <PositionsCard positions={positions} allowClose={live} />
             {positions.length > 0 && (
               <View className="flex-row items-center justify-between px-1">
                 <Text size="sm" muted className="uppercase tracking-widest">

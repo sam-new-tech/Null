@@ -1,4 +1,5 @@
-import { Pressable, ScrollView, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
 
@@ -6,9 +7,10 @@ import { AccountCard } from '@/components/home/account-card';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { PositionsCard } from '@/components/home/positions-card';
 import { TodaySummary } from '@/components/home/today-summary';
-import { LogoMark } from '@/components/screen-header';
+import { LiveBadge, LogoMark } from '@/components/screen-header';
 import { useAuth } from '@/context/auth';
 import { Button } from 'panelui-native/components/button';
+import { liveEngine } from '@/lib/ctrader/live';
 import { Popover } from 'panelui-native/components/popover';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { useTrading } from '@/lib/trading/useTrading';
@@ -24,18 +26,32 @@ function SectionLabel({ children }: { children: string }) {
 }
 
 export default function HomeScreen() {
-  const { account, stats, positions } = useTrading();
-  const live = useLive();
+  const { account, stats, positions, live } = useTrading();
   const { logout } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await liveEngine.refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <View className="flex-1 bg-background">
       <ChartBackdrop />
-      <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+      <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
         <View className="gap-4 p-4">
           <View className="flex-row items-center justify-between">
             <LogoMark size={48} />
-            <Popover>
+            <View className="flex-row items-center gap-3">
+              <LiveBadge live={live} />
+              <Popover>
               <Popover.Trigger>
                 <Pressable className="h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-muted">
                   <Image
@@ -56,11 +72,12 @@ export default function HomeScreen() {
                 </Button>
               </Popover.Content>
             </Popover>
+            </View>
           </View>
           <AccountCard account={account} />
           <View className="gap-2">
             <SectionLabel>Live positions</SectionLabel>
-            <PositionsCard positions={positions} allowClose={live.status === 'ready'} />
+            <PositionsCard positions={positions} allowClose={live} />
           </View>
           <View className="gap-2">
             <SectionLabel>Summary</SectionLabel>

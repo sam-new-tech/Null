@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { RefreshControl, ScrollView, View } from 'react-native';
 
-import { ScreenHeader } from '@/components/screen-header';
+import { LiveBadge, ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
+import { liveEngine } from '@/lib/ctrader/live';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
@@ -12,8 +13,18 @@ import { Text } from 'panelui-native/primitives/text';
 const PAGE_SIZE = 7;
 
 export default function HistoryScreen() {
-  const { history } = useTrading();
+  const { history, live } = useTrading();
   const [page, setPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await liveEngine.refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -23,9 +34,13 @@ export default function HistoryScreen() {
   const up = total >= 0;
 
   return (
-    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+    <ScrollView
+      style={{ flex: 1, minHeight: 0 }}
+      contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
       <View className="gap-4 p-4">
         <ScreenHeader title="History" />
+        <LiveBadge live={live} />
         {history.length === 0 ? (
           <Card className="rounded-full">
             <Card.Content className="items-center py-4">
