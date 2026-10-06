@@ -8,7 +8,6 @@ import { GlassSheen } from '@/components/glass-sheen';
 
 export function TodaySummary({ stats }: { stats: DayStats }) {
   const up = stats.realizedPL >= 0;
-  const openUp = stats.openPL >= 0;
   return (
     <Card>
       <GlassSheen />
@@ -25,12 +24,6 @@ export function TodaySummary({ stats }: { stats: DayStats }) {
           </Text>
         </View>
         <View className="items-end gap-1">
-          <Text size="xs" muted className="uppercase tracking-widest">
-            Open
-          </Text>
-          <Text weight="bold" className={`font-mono ${openUp ? 'text-success' : 'text-destructive'}`}>
-            {formatMoney(stats.openPL)}
-          </Text>
           <Text size="sm" muted className="text-right">
             {`Trades: ${stats.trades} · Win: ${stats.wins} (${stats.winRate.toFixed(0)}%)`}
           </Text>
