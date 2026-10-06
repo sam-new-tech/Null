@@ -134,7 +134,7 @@ export default function BotScreen() {
 
   // Running: orb + live status + event logs + stop.
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
       <View className="gap-4 p-4">
         <ScreenHeader
           action={
@@ -160,6 +160,9 @@ export default function BotScreen() {
         <Row label="Open managed" value={`${status.openManaged} / 8`} />
         <Row label="Resting limits" value={String(status.restingCount)} />
         <Row label="Volume / level" value={`${status.volumeLots.toFixed(2)} lots`} />
+        <Button variant="destructive" fullWidth onPress={stop}>
+          Stop bot
+        </Button>
         <View className="gap-2">
           {status.logs.slice(0, 5).map((entry, i) => (
             <Card key={`${entry.time}-${i}`}>
@@ -188,9 +191,6 @@ export default function BotScreen() {
             </Card>
           ))}
         </View>
-        <Button variant="destructive" fullWidth onPress={stop}>
-          Stop bot
-        </Button>
       </View>
     </ScrollView>
   );
