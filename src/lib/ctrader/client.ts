@@ -104,18 +104,34 @@ export class CTraderClient {
         reject(new Error('Request timed out'));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(clientMsgId, { resolve, reject, timer });
-      try {
-        this.ws?.send(raw);
-      } catch (err) {
+      const fail = (err: Error) => {
         this.pending.delete(clientMsgId);
         clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error('Send failed'));
+        reject(err);
+      };
+      const sendNow = () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          fail(new Error('Not connected'));
+          return;
+        }
+        try {
+          this.ws.send(raw);
+        } catch (err) {
+          fail(err instanceof Error ? err : new Error('Send failed'));
+        }
+      };
+      if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+        // Brief grace for an in-flight (re)connect instead of instant reject.
+        const waited = Date.now();
+        const iv = setInterval(() => {
+          if (!this.ws || this.ws.readyState !== WebSocket.CONNECTING || Date.now() - waited > 5000) {
+            clearInterval(iv);
+            sendNow();
+          }
+        }, 100);
+        return;
       }
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.pending.delete(clientMsgId);
-        clearTimeout(timer);
-        reject(new Error('Not connected'));
-      }
+      sendNow();
     });
   }
 

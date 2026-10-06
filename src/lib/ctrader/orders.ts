@@ -271,11 +271,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * accepted, and `trendbars` (plural) as a fallback.
  *
  * Price form: ProtoOATrendbar declares `low` (int64) plus delta fields
- * deltaOpen/deltaClose/deltaHigh (uint64) with open = low + deltaOpen, etc.
- * Unlike spot quotes (ProtoOASpotEvent, explicitly "in 1/100000 of a unit"),
- * the trendbar proto comments carry NO scaling note, so values are treated
- * as raw price units: reconstruction is pure addition with no divisor.
- * Bars that already carry open/high/low/close numbers are used as-is.
+ * deltaOpen/deltaClose/deltaHigh (uint64): open = low + deltaOpen, etc.
+ * Verified live: these ints are 1/100000-scaled like spot quotes (XAUUSD
+ * arrives as ~414613000 for ~4146.13). Rule: when every price field is an
+ * integer, divide by 100000; pre-flattened doubles pass through untouched.
  * Time comes from utcTimestampInMinutes (minutes → ms).
  */
 export function mapTrendbars(payload: unknown): Trendbar[] {
@@ -298,6 +297,7 @@ export function mapTrendbars(payload: unknown): Trendbar[] {
     let high = toNum(item.high);
     let low = toNum(item.low);
     let close = toNum(item.close);
+    let scaled = false;
     if (open === undefined || high === undefined || low === undefined || close === undefined) {
       const base = toNum(item.low);
       const dOpen = toNum(item.deltaOpen);
@@ -310,6 +310,20 @@ export function mapTrendbars(payload: unknown): Trendbar[] {
       open = base + dOpen;
       close = base + dClose;
       high = base + dHigh;
+      scaled = true;
+    } else if (
+      Number.isInteger(open) &&
+      Number.isInteger(high) &&
+      Number.isInteger(low) &&
+      Number.isInteger(close)
+    ) {
+      scaled = true;
+    }
+    if (scaled) {
+      open /= 100000;
+      high /= 100000;
+      low /= 100000;
+      close /= 100000;
     }
     const volume = toNum(item.volume);
     out.push(volume === undefined ? { time, open, high, low, close } : { time, open, high, low, close, volume });

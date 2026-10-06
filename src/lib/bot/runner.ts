@@ -100,6 +100,9 @@ class BotRunner {
   private lastPrice: number | null = null;
   private barDir: 'up' | 'down' | null = null;
   private lastBarTime = 0;
+  private lastEscapeAt = 0;
+  private failures = 0;
+  private coolUntil = 0;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private spotUnsub: (() => void) | null = null;
   private loaded = false;
@@ -325,6 +328,9 @@ class BotRunner {
   /** Escape: close everything managed, drop limits, re-anchor at market. */
   private async escape(price: number): Promise<void> {
     const p = this.persisted;
+    // Cooldown: never escape twice within 60s (protects against bad data storms).
+    if (Date.now() - this.lastEscapeAt < 60000) return;
+    this.lastEscapeAt = Date.now();
     this.log('escape', `Price left the grid at ${price.toFixed(2)} — flattening and re-anchoring`);
     try {
       const res = await liveEngine.execRequest(Payload.ReconcileReq, {
@@ -368,11 +374,19 @@ class BotRunner {
     const p = this.persisted;
     if (p.state !== 'running' || !p.grid) return false;
     if (!liveEngine.connected) return false;
-    const accountId = this.accountId();
+    // Back off after repeated failures (e.g. rate limiting): pause 2 minutes.
+    if (Date.now() < this.coolUntil) return false;
+    let accountId: number;
+    try {
+      accountId = this.accountId();
+    } catch {
+      return false;
+    }
 
-    const res = await liveEngine.execRequest(Payload.ReconcileReq, {
-      ctidTraderAccountId: accountId,
-    });
+    try {
+      const res = await liveEngine.execRequest(Payload.ReconcileReq, {
+        ctidTraderAccountId: accountId,
+      });
     const positions = ((res.position ?? []) as {
       positionId: number;
       tradeData: { label?: string; tradeSide: number | string; volume: number };
@@ -450,7 +464,17 @@ class BotRunner {
       }
     }
     if (acted) await this.persist();
+    this.failures = 0;
     return acted;
+    } catch {
+      this.failures += 1;
+      if (this.failures >= 3) {
+        this.coolUntil = Date.now() + 120000;
+        this.failures = 0;
+        this.log('error', 'cTrader is rate-limiting — pausing 2 minutes');
+      }
+      return false;
+    }
   }
 
   /** Spot-tick entry point (foreground). */
