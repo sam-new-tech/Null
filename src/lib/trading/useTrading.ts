@@ -27,18 +27,26 @@ export function useTrading(): MockAccount {
       const detail = deal.closePositionDetail!;
       const digits = detail.moneyDigits ?? 2;
       const scale = Math.pow(10, digits);
+      const at = new Date(deal.executionTimestamp);
+      const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
       return {
         id: Number(deal.dealId),
         symbol: nameOf(deal.symbolId),
         side: (deal.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
         volume: deal.volume / 10000000,
         pl: (detail.grossProfit + detail.swap + detail.commission) / scale,
-        time: new Date(deal.executionTimestamp).toLocaleTimeString('en-GB'),
+        time: at.toLocaleTimeString('en-GB'),
+        day,
       };
     });
     const account = liveEngine.accountState();
-    const trades = history.length;
-    const wins = history.filter((t) => t.pl > 0).length;
+    const today = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const todayDeals = history.filter((t) => t.day === today);
+    const trades = todayDeals.length;
+    const wins = todayDeals.filter((t) => t.pl > 0).length;
     return {
       account,
       stats: {

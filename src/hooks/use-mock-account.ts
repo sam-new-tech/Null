@@ -20,15 +20,8 @@ export interface ClosedTrade {
   volume: number;
   pl: number;
   time: string;
-}
-
-export interface ClosedTrade {
-  id: number;
-  symbol: string;
-  side: Side;
-  volume: number;
-  pl: number;
-  time: string;
+  /** YYYY-MM-DD of the close, for per-day stats. */
+  day: string;
 }
 
 export interface AccountState {
@@ -97,6 +90,10 @@ function clockNow(): string {
   return new Date().toLocaleTimeString('en-GB');
 }
 
+function todayKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function randomPosition(): Position {
   const side: Side = Math.random() < 0.5 ? 'buy' : 'sell';
   const symbol = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
@@ -161,6 +158,7 @@ export function useMockAccount(): MockAccount {
             volume: closed.volume,
             pl: closed.pl,
             time: clockNow(),
+            day: todayKey(),
           },
           ...history,
         ].slice(0, MAX_HISTORY);
@@ -179,11 +177,14 @@ export function useMockAccount(): MockAccount {
     };
   }, []);
 
-  const { positions, history, trades, wins } = feed;
+  const { positions, history } = feed;
   const openPL = positions.reduce((sum, p) => sum + p.pl, 0);
   const equity = START_BALANCE + openPL;
   const margin = positions.length * MARGIN_PER_POSITION;
   const freeMargin = equity - margin;
+  const today = todayKey();
+  const todayTrades = history.filter((t) => t.day === today);
+  const todayWins = todayTrades.filter((t) => t.pl > 0).length;
 
   return {
     account: {
@@ -194,9 +195,9 @@ export function useMockAccount(): MockAccount {
       marginLevel: margin > 0 ? (equity / margin) * 100 : 0,
     },
     stats: {
-      trades,
-      wins,
-      winRate: trades === 0 ? 0 : (wins / trades) * 100,
+      trades: todayTrades.length,
+      wins: todayWins,
+      winRate: todayTrades.length === 0 ? 0 : (todayWins / todayTrades.length) * 100,
       openPL,
     },
     positions,
