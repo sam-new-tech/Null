@@ -86,9 +86,14 @@ export default function BotScreen() {
           />
         </View>
         <View className="flex-1 items-center justify-center px-8" style={{ paddingBottom: TAB_CLEARANCE }}>
-          <Button size="lg" fullWidth disabled={!canArm} onPress={() => setSheetOpen(true)}>
-            Start bot
-          </Button>
+          <View className="w-full items-center gap-5">
+            <Text size="xl" weight="bold" className="text-center">
+              Grid Bot
+            </Text>
+            <Button size="lg" fullWidth disabled={!canArm} onPress={() => setSheetOpen(true)}>
+              Start bot
+            </Button>
+          </View>
           {!canArm && (
             <Text size="sm" muted className="mt-3 text-center">
               Connect your cTrader account to arm the bot

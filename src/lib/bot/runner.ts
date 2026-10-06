@@ -479,11 +479,12 @@ class BotRunner {
 
   /** Spot-tick entry point (foreground). */
   async onSpot(price: number): Promise<void> {
-    const p = this.persisted;
-    if (p.state !== 'running' || !p.grid || !Number.isFinite(price)) return;
-    const prev = this.lastPrice;
-    this.lastPrice = price;
-    const intents = planTick({
+    try {
+      const p = this.persisted;
+      if (p.state !== 'running' || !p.grid || !Number.isFinite(price)) return;
+      const prev = this.lastPrice;
+      this.lastPrice = price;
+      const intents = planTick({
       grid: p.grid,
       price,
       prevPrice: prev,
@@ -500,6 +501,9 @@ class BotRunner {
       if (intent.type === 'place') {
         await this.place(intent.side, intent.level, intent.tp, intent.sl);
       }
+    }
+    } catch (err) {
+      this.log('error', err instanceof Error ? err.message : 'Tick failed');
     }
   }
 
