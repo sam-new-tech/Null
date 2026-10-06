@@ -30,6 +30,8 @@ export const Payload = {
   RefreshTokenRes: 2174,
   SymbolsListReq: 2114,
   SymbolsListRes: 2115,
+  SymbolByIdReq: 2116,
+  SymbolByIdRes: 2117,
   GetTrendbarsReq: 2137,
   GetTrendbarsRes: 2138,
 } as const;

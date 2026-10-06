@@ -53,6 +53,7 @@ interface PersistedState {
   state: 'stopped' | 'running';
   symbol: string;
   symbolId: number;
+  digits: number;
   riskPct: number;
   volumeLots: number;
   leverage: number;
@@ -67,6 +68,7 @@ const DEFAULT_PERSISTED: PersistedState = {
   state: 'stopped',
   symbol: 'XAUUSD',
   symbolId: 0,
+  digits: 2,
   riskPct: 2,
   volumeLots: 0.02,
   leverage: 100,
@@ -220,6 +222,17 @@ class BotRunner {
     const snapshot = liveEngine.getSnapshot();
     const leverage = snapshot.trader?.leverageInCents ? snapshot.trader.leverageInCents / 100 : 100;
     const symbolId = this.symbolId(this.persisted.symbol);
+    let digits = 2;
+    try {
+      const res = await liveEngine.execRequest(Payload.SymbolByIdReq, {
+        ctidTraderAccountId: liveEngine.getAccountId(),
+        symbolId: [symbolId],
+      });
+      const list = (res.symbol ?? []) as { digits?: number }[];
+      if (typeof list[0]?.digits === 'number') digits = list[0].digits;
+    } catch {
+      // Fall back to 2 decimals.
+    }
     try {
       const { status } = await Notifications.getPermissionsAsync();
       if (status !== 'granted') await Notifications.requestPermissionsAsync();
@@ -242,6 +255,7 @@ class BotRunner {
       ...this.persisted,
       state: 'running',
       symbolId,
+      digits,
       riskPct,
       volumeLots,
       leverage,
@@ -316,16 +330,22 @@ class BotRunner {
     return `${BOT_LABEL_PREFIX}-${side}-${Math.round(level * 100)}`;
   }
 
+  private round(n: number): number {
+    const f = Math.pow(10, this.persisted.digits);
+    return Math.round(n * f) / f;
+  }
+
   private async place(side: 'buy' | 'sell', level: number, tp: number, sl: number): Promise<void> {
     const p = this.persisted;
+    const lv = this.round(level);
     const pair = placeLimitOrder(this.accountId(), {
       symbolId: p.symbolId,
       side,
       volumeLots: p.volumeLots,
-      limitPrice: level,
-      takeProfit: tp,
-      stopLoss: sl,
-      label: this.labelFor(side, level),
+      limitPrice: lv,
+      takeProfit: this.round(tp),
+      stopLoss: this.round(sl),
+      label: this.labelFor(side, lv),
       unitsPerLot: unitsPerLot(p.symbol),
     });
     liveEngine.execSend(pair.type, pair.payload);
