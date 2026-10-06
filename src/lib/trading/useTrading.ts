@@ -40,13 +40,8 @@ export function useTrading(): MockAccount {
       };
     });
     const account = liveEngine.accountState();
-    const today = (() => {
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    })();
-    const todayDeals = history.filter((t) => t.day === today);
-    const trades = todayDeals.length;
-    const wins = todayDeals.filter((t) => t.pl > 0).length;
+    const trades = history.length;
+    const wins = history.filter((t) => t.pl > 0).length;
     return {
       account,
       stats: {

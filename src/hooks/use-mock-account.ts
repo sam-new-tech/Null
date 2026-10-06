@@ -182,9 +182,7 @@ export function useMockAccount(): MockAccount {
   const equity = START_BALANCE + openPL;
   const margin = positions.length * MARGIN_PER_POSITION;
   const freeMargin = equity - margin;
-  const today = todayKey();
-  const todayTrades = history.filter((t) => t.day === today);
-  const todayWins = todayTrades.filter((t) => t.pl > 0).length;
+  const wins = history.filter((t) => t.pl > 0).length;
 
   return {
     account: {
@@ -195,9 +193,9 @@ export function useMockAccount(): MockAccount {
       marginLevel: margin > 0 ? (equity / margin) * 100 : 0,
     },
     stats: {
-      trades: todayTrades.length,
-      wins: todayWins,
-      winRate: todayTrades.length === 0 ? 0 : (todayWins / todayTrades.length) * 100,
+      trades: history.length,
+      wins,
+      winRate: history.length === 0 ? 0 : (wins / history.length) * 100,
       openPL,
     },
     positions,

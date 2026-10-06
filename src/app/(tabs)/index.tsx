@@ -61,7 +61,7 @@ export default function HomeScreen() {
             <PositionsCard positions={positions} />
           </View>
           <View className="gap-2">
-            <SectionLabel>Today&apos;s summary</SectionLabel>
+            <SectionLabel>Summary</SectionLabel>
             <TodaySummary stats={stats} />
           </View>
         </View>
