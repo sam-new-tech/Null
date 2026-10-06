@@ -124,12 +124,9 @@ export const ExecutionType = {
 
 export type ExecutionTypeName = (typeof ExecutionType)[keyof typeof ExecutionType];
 
-/** 1 lot = 100_000 units; proto volume is in 0.01 of a unit ("cents"). */
-const VOLUME_PER_LOT = 10_000_000;
-
 /**
- * Base-asset units in one lot. FX default 100_000; metals/crypto differ.
- * XAUUSD is the bot's market (1 lot = 100 oz); others best-effort.
+ * Base-asset units in one lot (proto volume = units × 100). FX default
+ * 100_000; metals/crypto differ. XAUUSD is the bot's market (1 lot = 100 oz).
  */
 export function unitsPerLot(symbolName: string): number {
   const s = symbolName.toUpperCase().replace('/', '');

@@ -171,7 +171,7 @@ class LiveEngine {
         (a) => a.ctidTraderAccountId === accountId,
       );
       this.attachEvents(accountId);
-      await this.snapshotAll(accountId);
+      await this.snapshotAll(accountId, true);
       this.emit({ status: 'ready', account: match ?? null });
       this.startLightRefresh();
     } catch (err) {
@@ -196,7 +196,7 @@ class LiveEngine {
   async refresh(): Promise<void> {
     const accountId = this.session?.ctidTraderAccountId;
     if (!accountId || this.snapshot.status !== 'ready') return;
-    await this.snapshotAll(accountId);
+    await this.snapshotAll(accountId, true);
   }
 
   private request(type: number, payload: Record<string, unknown>) {
@@ -227,28 +227,37 @@ class LiveEngine {
   }
 
   private lastSnapshotAt = 0;
+  private lastDealsAt = 0;
 
   private async snapshotAll(accountId: number, force = false): Promise<void> {
     // Debounce event-driven refreshes: bursts of fills must not storm the server.
     if (!force && Date.now() - this.lastSnapshotAt < 5000) return;
     this.lastSnapshotAt = Date.now();
     try {
+      // Symbols barely change: fetch once per connection. Deals refresh at
+      // most every 5 minutes (closes still surface via ExecutionEvent).
+      const needSymbols = this.snapshot.symbols.size === 0;
+      const needDeals = force || Date.now() - this.lastDealsAt > 300000;
       const [traderRes, reconcileRes, symbolsRes, dealsRes] = await Promise.all([
       this.request(Payload.TraderReq, { ctidTraderAccountId: accountId }),
       this.request(Payload.ReconcileReq, { ctidTraderAccountId: accountId }),
-      this.request(Payload.SymbolsListReq, { ctidTraderAccountId: accountId }),
-      this.request(Payload.DealListReq, {
-        ctidTraderAccountId: accountId,
-        fromTimestamp: Date.now() - 30 * 24 * 3600 * 1000,
-        maxRows: 100,
-      }),
+      needSymbols
+        ? this.request(Payload.SymbolsListReq, { ctidTraderAccountId: accountId })
+        : Promise.resolve(null),
+      needDeals
+        ? this.request(Payload.DealListReq, {
+            ctidTraderAccountId: accountId,
+            fromTimestamp: Date.now() - 30 * 24 * 3600 * 1000,
+            maxRows: 100,
+          })
+        : Promise.resolve(null),
     ]);
 
-    const symbols = new Map<number, SymbolInfo>();
-    const rawSymbols = (symbolsRes.symbol ?? []) as {
+    const symbols = needSymbols || force ? new Map<number, SymbolInfo>() : this.snapshot.symbols;
+    const rawSymbols = ((symbolsRes?.symbol ?? []) as {
       symbolId: number;
       symbolName?: string;
-    }[];
+    }[]);
     rawSymbols.forEach((s) => {
       if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: 2 });
     });
@@ -279,9 +288,14 @@ class LiveEngine {
       }
     }
 
-    const deals = ((dealsRes.deal ?? []) as DealInfo[])
-      .filter((deal) => deal.closePositionDetail !== undefined)
-      .sort((a, b) => b.executionTimestamp - a.executionTimestamp);
+    const deals = (
+      needDeals
+        ? (((dealsRes?.deal ?? []) as DealInfo[])
+            .filter((deal) => deal.closePositionDetail !== undefined)
+            .sort((a, b) => b.executionTimestamp - a.executionTimestamp))
+        : this.snapshot.deals
+    );
+    if (needDeals) this.lastDealsAt = Date.now();
 
     this.emit({
       trader: (traderRes.trader ?? null) as TraderInfo | null,

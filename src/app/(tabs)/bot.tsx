@@ -183,6 +183,11 @@ export default function BotScreen() {
                 {status.lastPrice.toFixed(2)}
               </Text>
             )}
+            {status.coolingDown && (
+              <Text size="sm" muted className="text-center">
+                Taking a short break — back on its own soon
+              </Text>
+            )}
           </Card.Content>
         </Card>
         <Row label="Open managed" value={`${status.openManaged} / 8`} />

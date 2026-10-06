@@ -10,7 +10,6 @@ import {
   isCancelRejectedStatus,
   isFilledStatus,
   isRejectedStatus,
-  isRestingOrderStatus,
   mapTrendbars,
   placeLimitOrder,
   TrendbarPeriod,
@@ -50,6 +49,7 @@ export interface BotStatus {
   startedAt: number | null;
   lastTick: number | null;
   lastPrice: number | null;
+  coolingDown: boolean;
   logs: BotLogEntry[];
 }
 
@@ -180,6 +180,7 @@ class BotRunner {
       startedAt: p.startedAt,
       lastTick: this.lastEmitAt,
       lastPrice: this.lastPrice,
+      coolingDown: Date.now() < this.coolUntil,
       logs: this.logs,
     };
   }
@@ -544,7 +545,7 @@ class BotRunner {
       if (this.failures >= 3) {
         this.coolUntil = Date.now() + 120000;
         this.failures = 0;
-        this.log('error', 'cTrader is rate-limiting — pausing 2 minutes');
+        this.log('error', 'Wait a moment — resting, then resuming on its own');
       }
       return false;
     }
