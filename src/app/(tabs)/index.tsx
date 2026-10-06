@@ -12,6 +12,7 @@ import { Button } from 'panelui-native/components/button';
 import { Popover } from 'panelui-native/components/popover';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { useTrading } from '@/lib/trading/useTrading';
+import { useLive } from '@/lib/ctrader/live';
 import { Text } from 'panelui-native/primitives/text';
 
 function SectionLabel({ children }: { children: string }) {
@@ -24,6 +25,7 @@ function SectionLabel({ children }: { children: string }) {
 
 export default function HomeScreen() {
   const { account, stats, positions } = useTrading();
+  const live = useLive();
   const { logout } = useAuth();
 
   return (
@@ -58,7 +60,7 @@ export default function HomeScreen() {
           <AccountCard account={account} />
           <View className="gap-2">
             <SectionLabel>Live positions</SectionLabel>
-            <PositionsCard positions={positions} />
+            <PositionsCard positions={positions} allowClose={live.status === 'ready'} />
           </View>
           <View className="gap-2">
             <SectionLabel>Summary</SectionLabel>

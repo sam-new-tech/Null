@@ -6,6 +6,7 @@ import { ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
+import { useLive } from '@/lib/ctrader/live';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
@@ -63,6 +64,7 @@ function OrderRow({ order, last }: {
 
 export default function TradesScreen() {
   const { positions, orders } = useTrading();
+  const live = useLive();
   const [tab, setTab] = useState<Tab>('positions');
   const total = positions.reduce((sum, p) => sum + p.pl, 0);
   const up = total >= 0;
@@ -95,7 +97,7 @@ export default function TradesScreen() {
 
         {tab === 'positions' ? (
           <>
-            <PositionsCard positions={positions} />
+            <PositionsCard positions={positions} allowClose={live.status === 'ready'} />
             {positions.length > 0 && (
               <View className="flex-row items-center justify-between px-1">
                 <Text size="sm" muted className="uppercase tracking-widest">

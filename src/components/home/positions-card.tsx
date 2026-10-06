@@ -3,6 +3,9 @@ import { Pressable, View } from 'react-native';
 
 import type { Position } from '@/hooks/use-mock-account';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
+import { liveEngine } from '@/lib/ctrader/live';
+import { closePosition, unitsPerLot } from '@/lib/ctrader/orders';
+import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
@@ -24,10 +27,16 @@ function PositionRow({
   position,
   expanded,
   onToggle,
+  allowClose,
+  closing,
+  onClose,
 }: {
   position: Position;
   expanded: boolean;
   onToggle: () => void;
+  allowClose: boolean;
+  closing: boolean;
+  onClose: () => void;
 }) {
   const up = position.pl >= 0;
   return (
@@ -59,14 +68,42 @@ function PositionRow({
           <DetailRow label="Open" value={formatPrice(position.symbol, position.openPrice)} />
           <DetailRow label="TP" value={formatPrice(position.symbol, position.tp)} />
           <DetailRow label="SL" value={formatPrice(position.symbol, position.sl)} />
+          {allowClose && (
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={closing}
+              loading={closing}
+              onPress={onClose}
+              fullWidth>
+              Close position
+            </Button>
+          )}
         </View>
       )}
     </View>
   );
 }
 
-export function PositionsCard({ positions }: { positions: Position[] }) {
+export function PositionsCard({ positions, allowClose = false }: { positions: Position[]; allowClose?: boolean }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [closingId, setClosingId] = useState<number | null>(null);
+
+  const close = async (position: Position) => {
+    if (closingId !== null) return;
+    setClosingId(position.id);
+    try {
+      const accountId = liveEngine.getAccountId();
+      if (!accountId) return;
+      const pair = closePosition(accountId, position.id, position.volume, unitsPerLot(position.symbol));
+      liveEngine.execSend(pair.type, pair.payload);
+      setTimeout(() => {
+        void liveEngine.refresh();
+      }, 3000);
+    } finally {
+      setClosingId(null);
+    }
+  };
 
   if (positions.length === 0) {
     return (
@@ -87,6 +124,9 @@ export function PositionsCard({ positions }: { positions: Position[] }) {
               position={p}
               expanded={expandedId === p.id}
               onToggle={() => setExpandedId((id) => (id === p.id ? null : p.id))}
+              allowClose={allowClose}
+              closing={closingId === p.id}
+              onClose={() => void close(p)}
             />
           </Card.Content>
         </Card>
