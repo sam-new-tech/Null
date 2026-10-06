@@ -355,7 +355,11 @@ class BotRunner {
       for (const pos of open) {
         try {
           const units = unitsPerLot(nameOf(pos.tradeData.symbolId));
-          const pair = closePosition(accountId, pos.positionId, pos.tradeData.volume / (units * 100), units);
+          const lots = pos.tradeData.volume / (units * 100);
+          if (positions === 0) {
+            this.log('info', `Closing ${pos.positionId}: ${lots} lots (raw vol ${pos.tradeData.volume})`);
+          }
+          const pair = closePosition(accountId, pos.positionId, lots, units);
           liveEngine.execSend(pair.type, pair.payload);
           const confirmed = await this.awaitExecution((payload) => {
             const deal = payload.deal as { positionId?: number; closePositionDetail?: object } | undefined;

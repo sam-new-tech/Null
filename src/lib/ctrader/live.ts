@@ -261,6 +261,9 @@ class LiveEngine {
     rawSymbols.forEach((s) => {
       if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: 2 });
     });
+    if (symbols.size === 0) {
+      console.warn('[live] symbols empty, res keys:', Object.keys((symbolsRes ?? {}) as object));
+    }
 
     const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter((p) =>
       isOpenPositionStatus(p.positionStatus),
