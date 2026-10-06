@@ -10,6 +10,7 @@ import { Payload } from './protocol';
 import type {
   AccountInfo,
   DealInfo,
+  OrderInfo,
   PositionInfo,
   SymbolInfo,
   TraderInfo,
@@ -22,6 +23,7 @@ export interface LiveSnapshot {
   trader: TraderInfo | null;
   account: AccountInfo | null;
   positions: PositionInfo[];
+  orders: OrderInfo[];
   deals: DealInfo[];
   symbols: Map<number, SymbolInfo>;
   version: number;
@@ -33,6 +35,7 @@ const EMPTY: LiveSnapshot = {
   trader: null,
   account: null,
   positions: [],
+  orders: [],
   deals: [],
   symbols: new Map(),
   version: 0,
@@ -252,6 +255,9 @@ class LiveEngine {
     const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter(
       (p) => p.positionStatus === 'POSITION_STATUS_OPEN' || p.positionStatus === undefined,
     );
+    const orders = ((reconcileRes.order ?? []) as OrderInfo[]).filter(
+      (o) => o.orderStatus === 'ORDER_STATUS_ACCEPTED' || o.orderStatus === undefined,
+    );
 
     // Subscribe spots for open symbols (+ conversion helpers).
     const wanted = new Set<number>(positions.map((p) => p.tradeData.symbolId));
@@ -279,6 +285,7 @@ class LiveEngine {
     this.emit({
       trader: (traderRes.trader ?? null) as TraderInfo | null,
       positions,
+      orders,
       deals,
       symbols,
     });

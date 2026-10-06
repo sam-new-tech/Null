@@ -43,6 +43,15 @@ export function useTrading(): MockAccount {
       };
     });
     const account = liveEngine.accountState();
+    const orders = live.orders.map((o) => ({
+      id: String(o.orderId),
+      symbol: nameOf(o.tradeData.symbolId),
+      side: (o.tradeData.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
+      volume: lotsOf(o.tradeData.symbolId, o.tradeData.volume),
+      limitPrice: o.limitPrice ?? 0,
+      stopLoss: o.stopLoss ?? 0,
+      takeProfit: o.takeProfit ?? 0,
+    }));
     const trades = history.length;
     const wins = history.filter((t) => t.pl > 0).length;
     const realizedPL = history.reduce((sum, t) => sum + t.pl, 0);
@@ -56,6 +65,7 @@ export function useTrading(): MockAccount {
         realizedPL,
       },
       positions,
+      orders,
       history,
     };
   }

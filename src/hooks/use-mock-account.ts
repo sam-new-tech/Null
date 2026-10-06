@@ -41,10 +41,21 @@ export interface DayStats {
   realizedPL: number;
 }
 
+export interface LiveOrder {
+  id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  volume: number;
+  limitPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+}
+
 export interface MockAccount {
   account: AccountState;
   stats: DayStats;
   positions: Position[];
+  orders: LiveOrder[];
   history: ClosedTrade[];
 }
 
@@ -201,6 +212,7 @@ export function useMockAccount(): MockAccount {
       realizedPL: history.reduce((sum, t) => sum + t.pl, 0),
     },
     positions,
+    orders: [],
     history,
   };
 }

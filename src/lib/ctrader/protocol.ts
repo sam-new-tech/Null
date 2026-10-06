@@ -108,6 +108,15 @@ export interface DealInfo {
   };
 }
 
+export interface OrderInfo {
+  orderId: number;
+  tradeData: { symbolId: number; volume: number; tradeSide: number | string; label?: string };
+  orderStatus?: string;
+  limitPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+}
+
 export interface SymbolInfo {
   symbolId: number;
   symbolName: string;
