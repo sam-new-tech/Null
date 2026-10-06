@@ -127,8 +127,20 @@ export type ExecutionTypeName = (typeof ExecutionType)[keyof typeof ExecutionTyp
 /** 1 lot = 100_000 units; proto volume is in 0.01 of a unit ("cents"). */
 const VOLUME_PER_LOT = 10_000_000;
 
-function lotsToVolume(volumeLots: number): number {
-  return Math.round(volumeLots * VOLUME_PER_LOT);
+/**
+ * Base-asset units in one lot. FX default 100_000; metals/crypto differ.
+ * XAUUSD is the bot's market (1 lot = 100 oz); others best-effort.
+ */
+export function unitsPerLot(symbolName: string): number {
+  const s = symbolName.toUpperCase().replace('/', '');
+  if (s === 'XAUUSD') return 100;
+  if (s === 'XAGUSD') return 5000;
+  if (s === 'BTCUSD') return 1;
+  return 100000;
+}
+
+function lotsToVolume(volumeLots: number, unitsPerLot = 100000): number {
+  return Math.round(volumeLots * unitsPerLot * 100);
 }
 
 /** ProtoOASymbolsListReq (2114). Only field besides the account id is the
@@ -171,6 +183,7 @@ export interface LimitOrderParams {
   /** Echoed back in ExecutionEvent order.tradeData.label — used to correlate
    *  the async fill confirmation, so always set it. */
   label?: string;
+  unitsPerLot?: number;
 }
 
 /**
@@ -189,7 +202,7 @@ export function placeLimitOrder(accountId: number, params: LimitOrderParams): Re
     symbolId: params.symbolId,
     orderType: 2,
     tradeSide: params.side === 'buy' ? 1 : 2,
-    volume: lotsToVolume(params.volumeLots),
+    volume: lotsToVolume(params.volumeLots, params.unitsPerLot),
     limitPrice: params.limitPrice,
   };
   if (params.stopLoss !== undefined) payload.stopLoss = params.stopLoss;
@@ -214,13 +227,14 @@ export function closePosition(
   accountId: number,
   positionId: number | string,
   volumeLots: number,
+  unitsPerLot = 100000,
 ): RequestPair {
   return {
     type: 2111,
     payload: {
       ctidTraderAccountId: accountId,
       positionId: Number(positionId),
-      volume: lotsToVolume(volumeLots),
+      volume: lotsToVolume(volumeLots, unitsPerLot),
     },
   };
 }

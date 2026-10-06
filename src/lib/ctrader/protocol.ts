@@ -19,6 +19,7 @@ export const Payload = {
   SubscribeSpotsReq: 2127,
   SubscribeSpotsRes: 2128,
   SpotEvent: 2131,
+  OrderErrorEvent: 2132,
   DealListReq: 2133,
   DealListRes: 2134,
   ErrorRes: 2142,  GetAccountsByAccessTokenReq: 2149,

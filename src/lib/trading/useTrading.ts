@@ -1,5 +1,6 @@
 import { useMockAccount, type MockAccount } from '@/hooks/use-mock-account';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
+import { unitsPerLot } from '@/lib/ctrader/orders';
 
 /**
  * Single data source for all trading screens.
@@ -13,11 +14,13 @@ export function useTrading(): MockAccount {
   if (live.status === 'ready' && live.trader) {
     const symbols = live.symbols;
     const nameOf = (id: number) => symbols.get(id)?.symbolName ?? `#${id}`;
+    const lotsOf = (symbolId: number, volume: number) =>
+      volume / (unitsPerLot(nameOf(symbolId)) * 100);
     const positions = live.positions.map((p) => ({
       id: Number(p.positionId),
       symbol: nameOf(p.tradeData.symbolId),
       side: (p.tradeData.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
-      volume: p.tradeData.volume / 10000000,
+      volume: lotsOf(p.tradeData.symbolId, p.tradeData.volume),
       pl: liveEngine.unrealized(p),
       openPrice: p.price ?? 0,
       tp: p.takeProfit ?? 0,
@@ -33,7 +36,7 @@ export function useTrading(): MockAccount {
         id: Number(deal.dealId),
         symbol: nameOf(deal.symbolId),
         side: (deal.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
-        volume: deal.volume / 10000000,
+        volume: lotsOf(deal.symbolId, deal.volume),
         pl: (detail.grossProfit + detail.swap + detail.commission) / scale,
         time: at.toLocaleTimeString('en-GB'),
         day,

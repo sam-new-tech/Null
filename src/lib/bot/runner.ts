@@ -10,6 +10,7 @@ import {
   mapTrendbars,
   placeLimitOrder,
   TrendbarPeriod,
+  unitsPerLot,
 } from '../ctrader/orders';
 import { storeGet, storeSet } from '../storage';
 import {
@@ -107,6 +108,8 @@ class BotRunner {
   private coolUntil = 0;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private spotUnsub: (() => void) | null = null;
+  private execUnsub: (() => void) | null = null;
+  private orderErrUnsub: (() => void) | null = null;
   private loaded = false;
 
   subscribe = (listener: () => void): (() => void) => {
@@ -267,6 +270,14 @@ class BotRunner {
       const mid = ((bid ?? ask ?? 0) + (ask ?? bid ?? 0)) / 2 / 100000;
       void this.onSpot(mid);
     });
+    if (this.execUnsub) this.execUnsub();
+    this.execUnsub = liveEngine.onEvent(Payload.ExecutionEvent, (payload) => this.onExecution(payload));
+    if (this.orderErrUnsub) this.orderErrUnsub();
+    this.orderErrUnsub = liveEngine.onEvent(Payload.OrderErrorEvent, (payload) => {
+      const code = payload.errorCode as string | undefined;
+      const desc = payload.description as string | undefined;
+      this.log('error', `Order error: ${code ?? 'UNKNOWN'}${desc ? ` — ${desc}` : ''}`);
+    });
     await this.placeFullGrid();
     this.startReconcileLoop();
     this.emit();
@@ -278,7 +289,11 @@ class BotRunner {
     if (this.persisted.state === 'stopped') return;
     await this.cancelManagedOrders();
     if (this.spotUnsub) this.spotUnsub();
+    if (this.execUnsub) this.execUnsub();
+    if (this.orderErrUnsub) this.orderErrUnsub();
     this.spotUnsub = null;
+    this.execUnsub = null;
+    this.orderErrUnsub = null;
     this.persisted = { ...this.persisted, state: 'stopped', managedOrders: [] };
     this.stopReconcileLoop();
     await this.persist();
@@ -311,6 +326,7 @@ class BotRunner {
       takeProfit: tp,
       stopLoss: sl,
       label: this.labelFor(side, level),
+      unitsPerLot: unitsPerLot(p.symbol),
     });
     liveEngine.execSend(pair.type, pair.payload);
     this.log('info', `Limit ${side.toUpperCase()} ${p.volumeLots.toFixed(2)} @ ${level.toFixed(2)} TP ${tp.toFixed(2)}`);
@@ -345,7 +361,12 @@ class BotRunner {
       }[]).filter((pos) => p.managedPositions.some((m) => m.id === Number(pos.positionId)));
       for (const pos of open) {
         try {
-          const pair = closePosition(this.accountId(), pos.positionId, pos.tradeData.volume / 10000000);
+          const pair = closePosition(
+            this.accountId(),
+            pos.positionId,
+            pos.tradeData.volume / (unitsPerLot(p.symbol) * 100),
+            unitsPerLot(p.symbol),
+          );
           liveEngine.execSend(pair.type, pair.payload);
         } catch {
           // Best effort per position.
@@ -403,9 +424,21 @@ class BotRunner {
     }[]).filter((o) => o.orderStatus === 'ORDER_STATUS_ACCEPTED' || o.orderStatus === undefined);
 
     const mine = (label?: string) => typeof label === 'string' && label.startsWith(BOT_LABEL_PREFIX);
+    const sideOf = (v: number | string) => (v === 2 || v === 'SELL' ? 'sell' : 'buy') as 'buy' | 'sell';
     const myPositionIds = new Set(p.managedPositions.map((m) => m.id));
     const myPositions = positions.filter((pos) => myPositionIds.has(Number(pos.positionId)));
     const myOrders = orders.filter((o) => mine(o.tradeData.label));
+
+    // Track resting limits so the UI + stale-cancel logic see reality.
+    const tracked = myOrders.map((o) => ({
+      id: String(o.orderId),
+      side: sideOf(o.tradeData.tradeSide),
+      price: o.limitPrice ?? 0,
+    }));
+    if (JSON.stringify(tracked) !== JSON.stringify(p.managedOrders)) {
+      p.managedOrders = tracked;
+      await this.persist();
+    }
 
     // Drop tracking for anything that vanished (TP hit / manual close).
     const openIds = new Set(positions.map((pos) => Number(pos.positionId)));
@@ -417,7 +450,6 @@ class BotRunner {
 
     const price = this.lastPrice;
     if (price === null) return false;
-    const sideOf = (v: number | string) => (v === 2 || v === 'SELL' ? 'sell' : 'buy') as 'buy' | 'sell';
     const intents = planTick({
       grid: p.grid,
       price,
@@ -487,6 +519,7 @@ class BotRunner {
       if (p.state !== 'running' || !p.grid || !Number.isFinite(price)) return;
       const prev = this.lastPrice;
       this.lastPrice = price;
+      if (prev === null) return; // need two ticks to detect a touch — no burst on subscribe
       // Throttled UI heartbeat so the screen visibly ticks with the market.
       if (Date.now() - this.lastUiEmit > 1000) {
         this.lastUiEmit = Date.now();
@@ -526,7 +559,20 @@ class BotRunner {
       | undefined;
     const position = payload.position as { positionId?: number } | undefined;
     const label = order?.tradeData?.label;
-    const mine = typeof label === 'string' && label.startsWith(BOT_LABEL_PREFIX);
+    const mine =
+      (typeof label === 'string' && label.startsWith(BOT_LABEL_PREFIX)) ||
+      (order?.orderId !== undefined &&
+        this.persisted.managedOrders.some((o) => o.id === String(order.orderId)));
+
+    if (
+      order &&
+      (order.orderStatus === 'ORDER_REJECTED' || order.orderStatus === 'ORDER_CANCEL_REJECTED')
+    ) {
+      const code = (payload.errorCode as string | undefined) ?? order.orderStatus;
+      this.log('error', `Order ${String(order.orderId ?? '?')} rejected: ${code}`);
+      void this.persist();
+      this.emit();
+    }
 
     if (order && mine && order.orderStatus === 'ORDER_STATUS_FILLED' && order.orderId !== undefined) {
       this.log('fill', `Filled ${String(order.orderId)} (${label})`);
