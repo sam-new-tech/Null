@@ -313,6 +313,29 @@ class BotRunner {
   }
 
   /** Stop: cancel ALL our limits and close ALL our positions. Manual trades are untouched. */
+  /** Wait for an ExecutionEvent matching a predicate, with timeout. */
+  private awaitExecution(
+    match: (payload: Record<string, unknown>) => boolean,
+    timeoutMs = 10000,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const off = liveEngine.onEvent(Payload.ExecutionEvent, (payload) => {
+        try {
+          if (match(payload)) {
+            off();
+            resolve(true);
+          }
+        } catch {
+          // Ignore malformed events.
+        }
+      });
+      setTimeout(() => {
+        off();
+        resolve(false);
+      }, timeoutMs);
+    });
+  }
+
   /** Close ALL open positions + cancel ALL resting orders. No state change. */
   async flattenAll(): Promise<{ positions: number; orders: number }> {
     await this.load();
@@ -334,7 +357,17 @@ class BotRunner {
           const units = unitsPerLot(nameOf(pos.tradeData.symbolId));
           const pair = closePosition(accountId, pos.positionId, pos.tradeData.volume / (units * 100), units);
           liveEngine.execSend(pair.type, pair.payload);
-          positions += 1;
+          const confirmed = await this.awaitExecution((payload) => {
+            const deal = payload.deal as { positionId?: number; closePositionDetail?: object } | undefined;
+            return (
+              !!deal?.closePositionDetail && Number(deal.positionId) === Number(pos.positionId)
+            );
+          });
+          if (confirmed) {
+            positions += 1;
+          } else {
+            this.log('error', `Close ${pos.positionId} not confirmed — retry Close all`);
+          }
         } catch {
           // Best effort per position.
         }
@@ -343,12 +376,23 @@ class BotRunner {
         try {
           const pair = cancelOrder(accountId, o.orderId);
           liveEngine.execSend(pair.type, pair.payload);
-          orders += 1;
+          const confirmed = await this.awaitExecution((payload) => {
+            const order = payload.order as { orderId?: number; orderStatus?: number | string } | undefined;
+            return (
+              Number(order?.orderId) === Number(o.orderId) &&
+              (order?.orderStatus === 'ORDER_STATUS_CANCELLED' || order?.orderStatus === 5)
+            );
+          }, 8000);
+          if (confirmed) {
+            orders += 1;
+          } else {
+            this.log('error', `Cancel ${o.orderId} not confirmed — retry Close all`);
+          }
         } catch {
           // Best effort per order.
         }
       }
-      this.log('info', `Flattened ${positions} positions, cancelled ${orders} limits`);
+      this.log('info', `Flattened ${positions}/${open.length} positions, cancelled ${orders}/${resting.length} limits`);
     } catch (err) {
       this.log('error', `Flatten incomplete: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
       throw err;
