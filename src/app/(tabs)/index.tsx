@@ -14,7 +14,6 @@ import { liveEngine } from '@/lib/ctrader/live';
 import { Popover } from 'panelui-native/components/popover';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { useTrading } from '@/lib/trading/useTrading';
-import { useLive } from '@/lib/ctrader/live';
 import { Text } from 'panelui-native/primitives/text';
 
 function SectionLabel({ children }: { children: string }) {
