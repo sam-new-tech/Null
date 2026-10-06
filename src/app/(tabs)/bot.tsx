@@ -65,7 +65,7 @@ export default function BotScreen() {
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
   const riskPct = Number(riskText.replace(',', '.'));
-  const riskValid = Number.isFinite(riskPct) && riskPct > 0 && riskPct <= 10;
+  const riskValid = Number.isFinite(riskPct) && riskPct > 0 && riskPct <= 3;
   const stakePreview = riskValid ? (equity * riskPct) / 100 : 0;
 
   const confirmStart = async () => {
@@ -121,14 +121,14 @@ export default function BotScreen() {
           <Dialog.Content>
             <Dialog.Title>Risk per level</Dialog.Title>
             <Dialog.Description>
-              {`Stake per grid level as % of equity ($${equity.toFixed(2)}). Max 8 levels, $50 margin cap.`}
+              {`Stake per grid level as % of equity ($${equity.toFixed(2)}). Max 10 levels/side, 0.05 lots/level cap.`}
             </Dialog.Description>
             <Input
               label="Risk %"
               value={riskText}
               onChangeText={setRiskText}
               keyboardType="decimal-pad"
-              errorMessage={!riskValid && riskText.length > 0 ? 'Enter 0–10' : undefined}
+              errorMessage={!riskValid && riskText.length > 0 ? 'Enter 0–3' : undefined}
             />
             {riskValid && (
               <Text size="sm" muted>
@@ -192,7 +192,7 @@ export default function BotScreen() {
             )}
           </Card.Content>
         </Card>
-        <Row label="Open managed" value={`${status.openManaged} / 8`} />
+        <Row label="Open managed" value={`${status.openManaged} / 20`} />
         <Row label="Resting limits" value={String(status.restingCount)} />
         <Row label="Volume / level" value={`${status.volumeLots.toFixed(2)} lots`} />
         <Button variant="destructive" fullWidth onPress={stop}>
