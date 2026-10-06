@@ -10,6 +10,8 @@ import {
   returnUrl,
 } from '@/lib/ctrader/config';
 import { liveEngine } from '@/lib/ctrader/live';
+import { botRunner } from '@/lib/bot/runner';
+import { unregisterGridTask } from '@/lib/bot/background';
 import { clearSession, loadSession, saveSession, type CTraderSession } from '@/lib/ctrader/session';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -190,6 +192,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [completeWithCode, finishLoginWith]);
 
   const logout = useCallback(async () => {
+    try {
+      await botRunner.stop();
+    } catch {
+      // Best effort — session wipe below is what matters.
+    }
+    try {
+      await unregisterGridTask();
+    } catch {
+      // Best effort.
+    }
     liveEngine.stop();
     await clearSession();
     setConnected(false);
