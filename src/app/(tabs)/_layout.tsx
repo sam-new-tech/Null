@@ -17,7 +17,7 @@ export default function TabsLayout() {
     <View style={styles.root}>
       <Tabs>
         <SafeAreaView edges={['top']} style={styles.slot}>
-          <TabSlot />
+          <TabSlot style={styles.slot} />
         </SafeAreaView>
         <TabList
           style={[

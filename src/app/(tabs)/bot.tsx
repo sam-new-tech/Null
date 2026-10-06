@@ -154,7 +154,7 @@ export default function BotScreen() {
 
   // Running: orb + live status + event logs + stop.
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
+    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
       <View className="gap-3 p-4">
         <ScreenHeader
           action={

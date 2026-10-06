@@ -68,7 +68,7 @@ export default function TradesScreen() {
   const up = total >= 0;
 
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
       <View className="gap-4 p-4">
         <ScreenHeader title="Trades" />
         <View className="flex-row gap-2">

@@ -29,7 +29,7 @@ export default function HomeScreen() {
   return (
     <View className="flex-1 bg-background">
       <ChartBackdrop />
-      <ScrollView contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+      <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
         <View className="gap-4 p-4">
           <View className="flex-row items-center justify-between">
             <LogoMark size={48} />

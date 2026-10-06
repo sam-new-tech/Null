@@ -23,7 +23,7 @@ export default function HistoryScreen() {
   const up = total >= 0;
 
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
+    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}>
       <View className="gap-4 p-4">
         <ScreenHeader title="History" />
         {history.length === 0 ? (
