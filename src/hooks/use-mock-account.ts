@@ -6,7 +6,10 @@ export interface Position {
   id: number;
   symbol: string;
   side: Side;
+  /** Volume in lots, for display. */
   volume: number;
+  /** Raw protocol volume, echoed back verbatim on close. */
+  rawVolume: number;
   pl: number;
   openPrice: number;
   tp: number;
@@ -117,6 +120,7 @@ function randomPosition(): Position {
     symbol,
     side,
     volume: [0.01, 0.05, 0.1][Math.floor(Math.random() * 3)],
+    rawVolume: 100,
     pl: (Math.random() - 0.5) * 8,
     openPrice,
     tp: openPrice + dir * distance,

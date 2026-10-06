@@ -95,7 +95,7 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
     try {
       const accountId = liveEngine.getAccountId();
       if (!accountId) return;
-      const pair = closePosition(accountId, position.id, position.volume, unitsPerLot(position.symbol));
+      const pair = closePosition(accountId, position.id, 0, 100000, position.rawVolume);
       liveEngine.execSend(pair.type, pair.payload);
       setTimeout(() => {
         void liveEngine.refresh();

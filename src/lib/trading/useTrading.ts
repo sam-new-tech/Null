@@ -22,6 +22,7 @@ export function useTrading(): MockAccount & { live: boolean } {
       symbol: nameOf(p.tradeData.symbolId),
       side: (p.tradeData.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
       volume: lotsOf(p.tradeData.symbolId, p.tradeData.volume),
+      rawVolume: p.tradeData.volume,
       pl: liveEngine.unrealized(p),
       openPrice: p.price ?? 0,
       tp: p.takeProfit ?? 0,

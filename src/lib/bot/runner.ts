@@ -354,12 +354,8 @@ class BotRunner {
       const resting = ((res.order ?? []) as { orderId: number }[]).filter(Boolean);
       for (const pos of open) {
         try {
-          const units = unitsPerLot(nameOf(pos.tradeData.symbolId));
-          const lots = pos.tradeData.volume / (units * 100);
-          if (positions === 0) {
-            this.log('info', `Closing ${pos.positionId}: ${lots} lots (raw vol ${pos.tradeData.volume})`);
-          }
-          const pair = closePosition(accountId, pos.positionId, lots, units);
+          // Echo the exact protocol volume back — no unit math, always exact.
+          const pair = closePosition(accountId, pos.positionId, 0, 100000, pos.tradeData.volume);
           liveEngine.execSend(pair.type, pair.payload);
           const confirmed = await this.awaitExecution((payload) => {
             const deal = payload.deal as { positionId?: number; closePositionDetail?: object } | undefined;

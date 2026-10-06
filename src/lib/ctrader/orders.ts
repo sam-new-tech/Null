@@ -218,20 +218,22 @@ export function cancelOrder(accountId: number, orderId: number | string): Reques
 }
 
 /** ProtoOAClosePositionReq (2111). Pass the FULL position volume (in lots)
- *  to close the whole position. Confirm via the ExecutionEvent whose
- *  deal.positionId matches (see file header). */
+ *  to close the whole position — or rawVolume to echo the exact protocol
+ *  volume back (safest for full closes: no unit conversion involved).
+ *  Confirm via the ExecutionEvent whose deal.positionId matches. */
 export function closePosition(
   accountId: number,
   positionId: number | string,
   volumeLots: number,
   unitsPerLot = 100000,
+  rawVolume?: number,
 ): RequestPair {
   return {
     type: 2111,
     payload: {
       ctidTraderAccountId: accountId,
       positionId: Number(positionId),
-      volume: lotsToVolume(volumeLots, unitsPerLot),
+      volume: rawVolume !== undefined ? Math.round(rawVolume) : lotsToVolume(volumeLots, unitsPerLot),
     },
   };
 }

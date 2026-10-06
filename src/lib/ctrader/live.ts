@@ -254,15 +254,22 @@ class LiveEngine {
     ]);
 
     const symbols = needSymbols || force ? new Map<number, SymbolInfo>() : this.snapshot.symbols;
-    const rawSymbols = ((symbolsRes?.symbol ?? []) as {
+    const resRecord = (symbolsRes ?? {}) as Record<string, unknown>;
+    const rawList =
+      (Array.isArray(resRecord.symbol) && resRecord.symbol.length > 0 ? resRecord.symbol : null) ??
+      (Array.isArray(resRecord.symbols) && resRecord.symbols.length > 0 ? resRecord.symbols : null) ??
+      (Array.isArray(resRecord.lightSymbol) && resRecord.lightSymbol.length > 0 ? resRecord.lightSymbol : null) ??
+      (Array.isArray(resRecord.lightSymbols) && resRecord.lightSymbols.length > 0 ? resRecord.lightSymbols : null) ??
+      [];
+    const rawSymbols = rawList as {
       symbolId: number;
       symbolName?: string;
-    }[]);
+    }[];
     rawSymbols.forEach((s) => {
       if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: 2 });
     });
     if (symbols.size === 0) {
-      console.warn('[live] symbols empty, res keys:', Object.keys((symbolsRes ?? {}) as object));
+      console.warn('[live] symbols empty, res keys:', Object.keys(resRecord));
     }
 
     const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter((p) =>
