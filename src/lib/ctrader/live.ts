@@ -222,8 +222,14 @@ class LiveEngine {
     });
   }
 
-  private async snapshotAll(accountId: number): Promise<void> {
-    const [traderRes, reconcileRes, symbolsRes, dealsRes] = await Promise.all([
+  private lastSnapshotAt = 0;
+
+  private async snapshotAll(accountId: number, force = false): Promise<void> {
+    // Debounce event-driven refreshes: bursts of fills must not storm the server.
+    if (!force && Date.now() - this.lastSnapshotAt < 5000) return;
+    this.lastSnapshotAt = Date.now();
+    try {
+      const [traderRes, reconcileRes, symbolsRes, dealsRes] = await Promise.all([
       this.request(Payload.TraderReq, { ctidTraderAccountId: accountId }),
       this.request(Payload.ReconcileReq, { ctidTraderAccountId: accountId }),
       this.request(Payload.SymbolsListReq, { ctidTraderAccountId: accountId }),
@@ -276,6 +282,10 @@ class LiveEngine {
       deals,
       symbols,
     });
+    } catch (err) {
+      // Snapshot failures (e.g. rate limiting) must never crash the stream.
+      console.warn('[live] snapshot failed:', err instanceof Error ? err.message : err);
+    }
   }
 
   private startLightRefresh(): void {

@@ -318,11 +318,15 @@ class BotRunner {
   private async placeFullGrid(): Promise<void> {
     const p = this.persisted;
     if (!p.grid) return;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    // Stagger placements ~250ms apart: 8 at once trips the server rate limit.
     for (const L of p.grid.lower) {
       await this.place('buy', L, L + p.grid.step, L - 8 * p.grid.step);
+      await sleep(250);
     }
     for (const U of p.grid.upper) {
       await this.place('sell', U, U - p.grid.step, U + 8 * p.grid.step);
+      await sleep(250);
     }
   }
 
