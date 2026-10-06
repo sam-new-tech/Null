@@ -1,5 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ScrollView, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
@@ -30,6 +36,15 @@ function Row({ label, value, tone = 'neutral' }: { label: string; value: string;
       </Text>
     </Item>
   );
+}
+
+function LiveDot() {
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(withTiming(0.3, { duration: 900 }), -1, true);
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  return <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#34d399' }, style]} />;
 }
 
 export default function BotScreen() {
@@ -140,18 +155,21 @@ export default function BotScreen() {
   // Running: orb + live status + event logs + stop.
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
-      <View className="gap-4 p-4">
+      <View className="gap-3 p-4">
         <ScreenHeader
           action={
-            <Text size="sm" weight="bold" className="text-success">
-              Live
-            </Text>
+            <View className="flex-row items-center gap-2">
+              <LiveDot />
+              <Text size="sm" weight="bold" className="text-success">
+                Live
+              </Text>
+            </View>
           }
         />
         <Card>
           <GlassSheen />
-          <Card.Content className="items-center gap-3 p-6">
-            <ThinkingOrb state="working" size={120} />
+          <Card.Content className="items-center gap-2 p-5">
+            <ThinkingOrb state="working" size={96} />
             <Text size="lg" weight="bold" className="text-center">
               Grid running · {status.symbol}
             </Text>
@@ -160,6 +178,11 @@ export default function BotScreen() {
                 ? `step ${status.step.toFixed(2)} · risk ${status.riskPct}% · ${status.volumeLots.toFixed(2)} lots`
                 : 'Arming…'}
             </Text>
+            {status.lastPrice !== null && (
+              <Text size="2xl" weight="bold" className="text-center font-mono">
+                {status.lastPrice.toFixed(2)}
+              </Text>
+            )}
           </Card.Content>
         </Card>
         <Row label="Open managed" value={`${status.openManaged} / 8`} />
@@ -169,7 +192,7 @@ export default function BotScreen() {
           Stop bot
         </Button>
         <View className="gap-2">
-          {status.logs.slice(0, 5).map((entry, i) => (
+          {status.logs.slice(0, 3).map((entry, i) => (
             <Card key={`${entry.time}-${i}`}>
               <Card.Content className="gap-2 p-4">
                 <View className="flex-row items-center justify-between">

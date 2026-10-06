@@ -44,6 +44,7 @@ export interface BotStatus {
   restingCount: number;
   startedAt: number | null;
   lastTick: number | null;
+  lastPrice: number | null;
   logs: BotLogEntry[];
 }
 
@@ -98,6 +99,7 @@ class BotRunner {
   private revision = 0;
   private lastEmitAt: number | null = null;
   private lastPrice: number | null = null;
+  private lastUiEmit = 0;
   private barDir: 'up' | 'down' | null = null;
   private lastBarTime = 0;
   private lastEscapeAt = 0;
@@ -168,6 +170,7 @@ class BotRunner {
       restingCount: p.managedOrders.length,
       startedAt: p.startedAt,
       lastTick: this.lastEmitAt,
+      lastPrice: this.lastPrice,
       logs: this.logs,
     };
   }
@@ -484,6 +487,11 @@ class BotRunner {
       if (p.state !== 'running' || !p.grid || !Number.isFinite(price)) return;
       const prev = this.lastPrice;
       this.lastPrice = price;
+      // Throttled UI heartbeat so the screen visibly ticks with the market.
+      if (Date.now() - this.lastUiEmit > 1000) {
+        this.lastUiEmit = Date.now();
+        this.emit();
+      }
       const intents = planTick({
       grid: p.grid,
       price,
