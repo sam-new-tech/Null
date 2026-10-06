@@ -69,6 +69,7 @@ export default function TradesScreen() {
   const [tab, setTab] = useState<Tab>('positions');
   const [refreshing, setRefreshing] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const total = positions.reduce((sum, p) => sum + p.pl, 0);
   const up = total >= 0;
 
@@ -84,9 +85,12 @@ export default function TradesScreen() {
   const closeAll = async () => {
     if (closing) return;
     setClosing(true);
+    setCloseError(null);
     try {
       await botRunner.flattenAll();
       await liveEngine.refresh();
+    } catch (err) {
+      setCloseError(err instanceof Error ? err.message : 'Close failed — retry');
     } finally {
       setClosing(false);
     }
@@ -145,6 +149,11 @@ export default function TradesScreen() {
                 Close all
               </Button>
             )}
+            {closeError ? (
+              <Text size="sm" className="text-center text-destructive">
+                {closeError}
+              </Text>
+            ) : null}
           </>
         ) : orders.length === 0 ? (
           <Card className="rounded-full">
