@@ -507,12 +507,8 @@ class BotRunner {
       }[]).filter((pos) => p.managedPositions.some((m) => m.id === Number(pos.positionId)));
       for (const pos of open) {
         try {
-          const pair = closePosition(
-            this.accountId(),
-            pos.positionId,
-            pos.tradeData.volume / (unitsPerLot(p.symbol) * 100),
-            unitsPerLot(p.symbol),
-          );
+          // Echo exact protocol volume — no unit math (same as flattenAll).
+          const pair = closePosition(this.accountId(), pos.positionId, 0, 100000, pos.tradeData.volume);
           liveEngine.execSend(pair.type, pair.payload);
         } catch {
           // Best effort per position.
@@ -686,7 +682,7 @@ class BotRunner {
       prevPrice: prev,
       barDir: this.barDir,
       positions: p.managedPositions.map((m) => ({ id: String(m.id), side: m.side, entry: m.entry })),
-      orders: [],
+      orders: p.managedOrders.map((m) => ({ id: String(m.id), side: m.side, price: m.price })),
       volumeLots: p.volumeLots,
     });
     for (const intent of intents) {

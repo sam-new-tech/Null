@@ -13,8 +13,12 @@ import {
 
 const GOLD_COSTS = { commissionBps: 0.3, spreadBps: 0.5, slippageBps: 0.3 };
 const EQUITY = 10000;
-const LOT_OZ = 2; // 0.02 lots
+const LOT_OZ = 2; // 0.02 lots — matches app at ~0.83% risk on $10k
 const DISASTER = 8;
+// Shipped app params (runner.ts:start/escape). Keep in sync.
+const ATR_LEN = 10;
+const GRID_MULT = 1.9;
+const LEVELS = 10;
 
 interface Resting {
   side: "buy" | "sell";
@@ -41,7 +45,7 @@ function simulate(m: { o: number[]; h: number[]; l: number[]; c: number[] }, lab
   }));
   // Like runner.start(): need ≥25 bars, anchor on last CLOSED (drop forming).
   const seed = bars.slice(0, 60);
-  const grid = appBuildGrid(seed, 21, 0.25, 3);
+  const grid = appBuildGrid(seed, ATR_LEN, GRID_MULT, LEVELS);
   let quote = EQUITY;
   let costs = 0;
   const lowers0: Resting[] = grid.lower.map((L) => ({ side: "buy" as const, price: L, tp: L + grid.step, sl: L - DISASTER * grid.step }));
@@ -142,7 +146,12 @@ function simulate(m: { o: number[]; h: number[]; l: number[]; c: number[] }, lab
           // re-anchor like runner.escape(): fresh grid at market from history
           const hist = bars.slice(Math.max(0, b - 60), b);
           try {
-            const g2 = appBuildGrid(hist, 21, 0.25, 3);
+            let g2 = appBuildGrid(hist, ATR_LEN, GRID_MULT, LEVELS);
+            for (const mult of [2.2, 2.6, 3.0]) {
+              const lb = hist[hist.length - 1];
+              if (lb.high - lb.low <= g2.step * LEVELS) break;
+              g2 = appBuildGrid(hist, ATR_LEN, mult, LEVELS);
+            }
             cur = g2;
             const lowers: Resting[] = g2.lower.map((L) => ({ side: "buy" as const, price: L, tp: L + g2.step, sl: L - DISASTER * g2.step }));
             const uppers: Resting[] = g2.upper.map((U) => ({ side: "sell" as const, price: U, tp: U - g2.step, sl: U + DISASTER * g2.step }));
