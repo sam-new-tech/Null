@@ -3,7 +3,8 @@ import { ScrollView, View } from 'react-native';
 
 import { ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { formatMoney, useMockAccount } from '@/hooks/use-mock-account';
+import { formatMoney } from '@/hooks/use-mock-account';
+import { useTrading } from '@/lib/trading/useTrading';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
@@ -11,7 +12,7 @@ import { Text } from 'panelui-native/primitives/text';
 const PAGE_SIZE = 7;
 
 export default function HistoryScreen() {
-  const { history } = useMockAccount();
+  const { history } = useTrading();
   const [page, setPage] = useState(1);
 
   const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));

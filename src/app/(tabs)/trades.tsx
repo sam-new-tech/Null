@@ -3,11 +3,12 @@ import { ScrollView, View } from 'react-native';
 import { PositionsCard } from '@/components/home/positions-card';
 import { ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { formatMoney, useMockAccount } from '@/hooks/use-mock-account';
+import { formatMoney } from '@/hooks/use-mock-account';
+import { useTrading } from '@/lib/trading/useTrading';
 import { Text } from 'panelui-native/primitives/text';
 
 export default function TradesScreen() {
-  const { positions } = useMockAccount();
+  const { positions } = useTrading();
   const total = positions.reduce((sum, p) => sum + p.pl, 0);
   const up = total >= 0;
 

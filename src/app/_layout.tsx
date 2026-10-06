@@ -17,7 +17,7 @@ function AuthGuard() {
   const segments = useSegments();
 
   useEffect(() => {
-    const inAuth = segments[0] === '(auth)';
+    const inAuth = segments[0] === '(auth)' || segments[0] === 'oauth';
     if (!connected && !inAuth) router.replace('/(auth)/login');
     else if (connected && inAuth) router.replace('/(tabs)');
   }, [connected, segments]);

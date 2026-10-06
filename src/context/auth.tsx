@@ -1,30 +1,211 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+
+import {
+  CTRADER_CONFIGURED,
+  REDIRECT_URI,
+  exchangeCode,
+  grantUrl,
+  returnUrl,
+} from '@/lib/ctrader/config';
+import { liveEngine } from '@/lib/ctrader/live';
+import { clearSession, loadSession, saveSession, type CTraderSession } from '@/lib/ctrader/session';
+
+WebBrowser.maybeCompleteAuthSession();
 
 interface AuthContextValue {
   connected: boolean;
+  busy: boolean;
+  stage: string | null;
+  error: string | null;
+  live: boolean;
   login: () => Promise<void>;
-  logout: () => void;
+  connectWithCode: (code: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   connected: false,
+  busy: false,
+  stage: null,
+  error: null,
+  live: false,
   login: async () => {},
-  logout: () => {},
+  connectWithCode: async () => {},
+  logout: async () => {},
 });
+
+function codeFromUrl(url: string): string | null {
+  try {
+    return new URL(url).searchParams.get('code');
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
+
+  // Restore a stored session silently on launch.
+  useEffect(() => {
+    if (!CTRADER_CONFIGURED) return;
+    loadSession().then((session) => {
+      if (!session) return;
+      setBusy(true);
+      liveEngine
+        .start(session)
+        .then(() => {
+          setConnected(true);
+          setLive(true);
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Restore failed');
+        })
+        .finally(() => setBusy(false));
+    });
+  }, []);
 
   const login = useCallback(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    setError(null);
+    // No portal credentials yet: demo mode keeps every screen usable.
+    if (!CTRADER_CONFIGURED) {
+      setBusy(true);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        setConnected(true);
+        setLive(false);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Web: first-party /oauth callback completes via postMessage (see oauth.tsx).
+    if (Platform.OS === 'web') {
+      const listener = (event: MessageEvent) => {        if (event.origin !== window.location.origin) return;
+        const data = event.data as { type?: string; ok?: boolean; reason?: string; session?: CTraderSession };
+        if (data?.type !== 'ctrader-oauth') return;
+        window.removeEventListener('message', listener);
+        if (!data.ok || !data.session) {
+          setError(typeof data.reason === 'string' ? data.reason : 'Authorization failed');
+          setBusy(false);
+          return;
+        }
+        finishLoginWith(data.session);
+      };
+      setBusy(true);
+      window.addEventListener('message', listener);
+      // If the tab closes without completing, openBrowserAsync resolves and
+      // we reset; a real completion arrives first via postMessage.
+      try {
+        await WebBrowser.openBrowserAsync(grantUrl(REDIRECT_URI));
+      } finally {
+        window.removeEventListener('message', listener);
+        setBusy(false);
+      }
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await WebBrowser.openAuthSessionAsync(grantUrl(REDIRECT_URI), returnUrl());
+      if (result.type !== 'success') {
+        if (result.type === 'cancel' || result.type === 'dismiss') return;
+        throw new Error('Authorization was not completed');
+      }
+      const code = codeFromUrl(result.url);
+      if (!code) throw new Error('No authorization code returned');
+      await completeWithCode(code);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const completeWithCode = useCallback(async (code: string) => {
+    setStage('Exchanging code…');
+    const tokens = await exchangeCode(code, REDIRECT_URI);
+    const session = {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: Date.now() + tokens.expiresIn * 1000,
+      ctidTraderAccountId: 0,
+      isLive: false,
+    };
+    setStage('Connecting to cTrader…');
+    await liveEngine.start(session);
+    const stored = await loadSession();
+    if (!stored) throw new Error('Session was not stored');
     setConnected(true);
+    setLive(true);
+    setStage(null);
   }, []);
 
-  const logout = useCallback(() => {
+  const connectWithCode = useCallback(
+    async (code: string) => {
+      setError(null);
+      setBusy(true);
+      try {
+        await completeWithCode(code);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Login failed');
+        setStage(null);
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [completeWithCode],
+  );
+
+  const finishLoginWith = useCallback(async (session: CTraderSession) => {
+    try {
+      await saveSession(session);
+      await liveEngine.start(session);
+      const stored = await loadSession();
+      if (!stored) throw new Error('Session was not stored');
+      setConnected(true);
+      setLive(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const finishLogin = useCallback(async () => {
+    try {
+      const stored = await loadSession();
+      if (!stored) throw new Error('Session was not stored');
+      await liveEngine.start(stored);
+      setConnected(true);
+      setLive(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    liveEngine.stop();
+    await clearSession();
     setConnected(false);
+    setLive(false);
+    setError(null);
   }, []);
 
-  return <AuthContext.Provider value={{ connected, login, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ connected, busy, stage, error, live, login, connectWithCode, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {

@@ -11,7 +11,7 @@ import { useAuth } from '@/context/auth';
 import { Button } from 'panelui-native/components/button';
 import { Popover } from 'panelui-native/components/popover';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { useMockAccount } from '@/hooks/use-mock-account';
+import { useTrading } from '@/lib/trading/useTrading';
 import { Text } from 'panelui-native/primitives/text';
 
 function SectionLabel({ children }: { children: string }) {
@@ -23,7 +23,7 @@ function SectionLabel({ children }: { children: string }) {
 }
 
 export default function HomeScreen() {
-  const { account, stats, positions } = useMockAccount();
+  const { account, stats, positions } = useTrading();
   const { logout } = useAuth();
 
   return (

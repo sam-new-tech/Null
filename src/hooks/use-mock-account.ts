@@ -22,6 +22,15 @@ export interface ClosedTrade {
   time: string;
 }
 
+export interface ClosedTrade {
+  id: number;
+  symbol: string;
+  side: Side;
+  volume: number;
+  pl: number;
+  time: string;
+}
+
 export interface AccountState {
   balance: number;
   equity: number;

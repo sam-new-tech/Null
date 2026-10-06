@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "Null",
-    "slug": "Null",
+    "slug": "null",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "null",
+    "scheme": "xliquid",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": {
@@ -40,11 +40,19 @@
           },
           "imageWidth": 160
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "446f9ea7-cac2-4a31-8ff3-612a0afbf410"
+      }
+    },
+    "owner": "samuwayo"
   }
 }
