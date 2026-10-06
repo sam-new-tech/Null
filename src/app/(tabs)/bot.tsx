@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ScrollView, View } from 'react-native';
+import { router } from 'expo-router';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -83,8 +84,9 @@ export default function BotScreen() {
   };
 
   const stop = async () => {
-    await botRunner.stop();
+    await botRunner.stopAll();
     await unregisterGridTask();
+    router.replace('/');
   };
 
   // Stopped: only the Start button (plus account gate + risk sheet).

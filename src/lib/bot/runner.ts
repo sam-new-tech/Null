@@ -313,29 +313,28 @@ class BotRunner {
   }
 
   /** Stop: cancel ALL our limits and close ALL our positions. Manual trades are untouched. */
-  async stop(): Promise<void> {
+  /** Close ALL open positions + cancel ALL resting orders. No state change. */
+  async flattenAll(): Promise<{ positions: number; orders: number }> {
     await this.load();
-    if (this.persisted.state === 'stopped') return;
-    const p = this.persisted;
-    const units = unitsPerLot(p.symbol);
+    let positions = 0;
+    let orders = 0;
     try {
       const accountId = this.accountId();
       const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
-      const managedIds = new Set(p.managedPositions.map((m) => m.id));
+      const snapshot = liveEngine.getSnapshot();
+      const nameOf = (id: number) => snapshot.symbols.get(id)?.symbolName ?? '';
       const open = ((res.position ?? []) as {
         positionId: number;
-        tradeData: { volume: number; label?: string };
-      }[]).filter((pos) => managedIds.has(Number(pos.positionId)));
-      const resting = ((res.order ?? []) as {
-        orderId: number;
-        tradeData: { label?: string };
-      }[]).filter((o) =>
-        typeof o.tradeData.label === 'string' && o.tradeData.label.startsWith(BOT_LABEL_PREFIX),
-      );
+        tradeData: { symbolId: number; volume: number };
+        positionStatus?: string;
+      }[]).filter((pos) => pos.positionStatus === 'POSITION_STATUS_OPEN' || pos.positionStatus === undefined);
+      const resting = ((res.order ?? []) as { orderId: number }[]).filter(Boolean);
       for (const pos of open) {
         try {
+          const units = unitsPerLot(nameOf(pos.tradeData.symbolId));
           const pair = closePosition(accountId, pos.positionId, pos.tradeData.volume / (units * 100), units);
           liveEngine.execSend(pair.type, pair.payload);
+          positions += 1;
         } catch {
           // Best effort per position.
         }
@@ -344,11 +343,29 @@ class BotRunner {
         try {
           const pair = cancelOrder(accountId, o.orderId);
           liveEngine.execSend(pair.type, pair.payload);
+          orders += 1;
         } catch {
           // Best effort per order.
         }
       }
-      this.log('info', `Stopped — flattened ${open.length} positions, cancelled ${resting.length} limits`);
+      this.log('info', `Flattened ${positions} positions, cancelled ${orders} limits`);
+    } catch (err) {
+      this.log('error', `Flatten incomplete: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
+      throw err;
+    }
+    await this.persist();
+    this.emit();
+    return { positions, orders };
+  }
+
+  /** Stop everything: flatten all, then mark stopped. */
+  async stopAll(): Promise<{ positions: number; orders: number }> {
+    await this.load();
+    const p = this.persisted;
+    let result = { positions: 0, orders: 0 };
+    try {
+      this.accountId();
+      result = await this.flattenAll();
     } catch (err) {
       this.log('error', `Stop incomplete: ${err instanceof Error ? err.message : 'connection failed'} — retry Stop`);
     }
@@ -362,6 +379,12 @@ class BotRunner {
     this.stopReconcileLoop();
     await this.persist();
     this.emit();
+    return { positions, orders };
+  }
+
+  /** Legacy managed-only stop (kept for logout path). */
+  async stop(): Promise<void> {
+    await this.stopAll();
   }
 
   private async placeFullGrid(): Promise<void> {

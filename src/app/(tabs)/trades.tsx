@@ -7,6 +7,8 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
 import { liveEngine } from '@/lib/ctrader/live';
+import { botRunner } from '@/lib/bot/runner';
+import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
@@ -66,6 +68,7 @@ export default function TradesScreen() {
   const { positions, orders, live } = useTrading();
   const [tab, setTab] = useState<Tab>('positions');
   const [refreshing, setRefreshing] = useState(false);
+  const [closing, setClosing] = useState(false);
   const total = positions.reduce((sum, p) => sum + p.pl, 0);
   const up = total >= 0;
 
@@ -75,6 +78,17 @@ export default function TradesScreen() {
       await liveEngine.refresh();
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const closeAll = async () => {
+    if (closing) return;
+    setClosing(true);
+    try {
+      await botRunner.flattenAll();
+      await liveEngine.refresh();
+    } finally {
+      setClosing(false);
     }
   };
 
@@ -120,6 +134,16 @@ export default function TradesScreen() {
                   {formatMoney(total)}
                 </Text>
               </View>
+            )}
+            {(positions.length > 0 || orders.length > 0) && live && (
+              <Button
+                variant="destructive"
+                fullWidth
+                disabled={closing}
+                loading={closing}
+                onPress={() => void closeAll()}>
+                Close all
+              </Button>
             )}
           </>
         ) : orders.length === 0 ? (
