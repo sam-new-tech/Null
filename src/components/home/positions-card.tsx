@@ -4,7 +4,7 @@ import { Pressable, View } from 'react-native';
 import type { Position } from '@/hooks/use-mock-account';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
 import { liveEngine } from '@/lib/ctrader/live';
-import { closePosition, unitsPerLot } from '@/lib/ctrader/orders';
+import { closePosition } from '@/lib/ctrader/orders';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
