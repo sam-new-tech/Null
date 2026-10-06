@@ -17,6 +17,7 @@ WebBrowser.maybeCompleteAuthSession();
 interface AuthContextValue {
   connected: boolean;
   busy: boolean;
+  hydrated: boolean;
   stage: string | null;
   error: string | null;
   live: boolean;
@@ -28,6 +29,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   connected: false,
   busy: false,
+  hydrated: false,
   stage: null,
   error: null,
   live: false,
@@ -47,15 +49,22 @@ function codeFromUrl(url: string): string | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
 
   // Restore a stored session silently on launch.
   useEffect(() => {
-    if (!CTRADER_CONFIGURED) return;
+    if (!CTRADER_CONFIGURED) {
+      setHydrated(true);
+      return;
+    }
     loadSession().then((session) => {
-      if (!session) return;
+      if (!session) {
+        setHydrated(true);
+        return;
+      }
       setBusy(true);
       liveEngine
         .start(session)
@@ -66,7 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch((err: unknown) => {
           setError(err instanceof Error ? err.message : 'Restore failed');
         })
-        .finally(() => setBusy(false));
+        .finally(() => {
+          setBusy(false);
+          setHydrated(true);
+        });
     });
   }, []);
 
@@ -202,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ connected, busy, stage, error, live, login, connectWithCode, logout }}>
+    <AuthContext.Provider value={{ connected, busy, hydrated, stage, error, live, login, connectWithCode, logout }}>
       {children}
     </AuthContext.Provider>
   );

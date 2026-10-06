@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 export interface CTraderSession {
   accessToken: string;
@@ -18,14 +19,19 @@ const KEYS = {
 } as const;
 
 /**
- * Token vault. SecureStore = iOS Keychain / Android EncryptedSharedPreferences.
- * Every call is guarded: if the native module is unavailable (e.g. web without
- * the module), it falls back to memory so the UI keeps working and nothing
- * is written anywhere unexpected.
+ * Token vault. Native: SecureStore (Keychain / EncryptedSharedPreferences).
+ * Web: localStorage (SecureStore has no usable web backend here).
+ * Memory fallback keeps the UI working if both fail.
  */
 let memory: Partial<Record<keyof typeof KEYS, string>> = {};
 
+const webStore =
+  Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage
+    ? window.localStorage
+    : null;
+
 async function get(key: keyof typeof KEYS): Promise<string | null> {
+  if (webStore) return webStore.getItem(KEYS[key]) ?? memory[key] ?? null;
   try {
     const value = await SecureStore.getItemAsync(KEYS[key]);
     if (value !== null) return value;
@@ -36,6 +42,15 @@ async function get(key: keyof typeof KEYS): Promise<string | null> {
 }
 
 async function set(key: keyof typeof KEYS, value: string): Promise<void> {
+  if (webStore) {
+    try {
+      webStore.setItem(KEYS[key], value);
+      return;
+    } catch {
+      memory[key] = value;
+      return;
+    }
+  }
   try {
     await SecureStore.setItemAsync(KEYS[key], value);
   } catch {
@@ -44,10 +59,18 @@ async function set(key: keyof typeof KEYS, value: string): Promise<void> {
 }
 
 async function del(key: keyof typeof KEYS): Promise<void> {
+  delete memory[key];
+  if (webStore) {
+    try {
+      webStore.removeItem(KEYS[key]);
+    } catch {
+      // Ignore.
+    }
+  }
   try {
     await SecureStore.deleteItemAsync(KEYS[key]);
   } catch {
-    delete memory[key];
+    // Ignore — memory already cleared.
   }
 }
 

@@ -13,15 +13,17 @@ import { AuthProvider, useAuth } from '@/context/auth';
 SplashScreen.preventAutoHideAsync();
 
 function AuthGuard() {
-  const { connected } = useAuth();
+  const { connected, hydrated } = useAuth();
   const segments = useSegments();
 
   useEffect(() => {
+    if (!hydrated) return;
     const inAuth = segments[0] === '(auth)' || segments[0] === 'oauth';
     if (!connected && !inAuth) router.replace('/(auth)/login');
     else if (connected && inAuth) router.replace('/(tabs)');
-  }, [connected, segments]);
+  }, [connected, hydrated, segments]);
 
+  if (!hydrated) return null;
   return <Slot />;
 }
 
