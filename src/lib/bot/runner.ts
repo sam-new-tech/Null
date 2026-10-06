@@ -379,7 +379,7 @@ class BotRunner {
     this.stopReconcileLoop();
     await this.persist();
     this.emit();
-    return { positions, orders };
+    return result;
   }
 
   /** Legacy managed-only stop (kept for logout path). */
