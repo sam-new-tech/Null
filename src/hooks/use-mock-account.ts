@@ -38,6 +38,7 @@ export interface DayStats {
   wins: number;
   winRate: number;
   openPL: number;
+  realizedPL: number;
 }
 
 export interface MockAccount {
@@ -197,6 +198,7 @@ export function useMockAccount(): MockAccount {
       wins,
       winRate: history.length === 0 ? 0 : (wins / history.length) * 100,
       openPL,
+      realizedPL: history.reduce((sum, t) => sum + t.pl, 0),
     },
     positions,
     history,

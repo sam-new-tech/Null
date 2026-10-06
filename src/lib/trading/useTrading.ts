@@ -42,6 +42,7 @@ export function useTrading(): MockAccount {
     const account = liveEngine.accountState();
     const trades = history.length;
     const wins = history.filter((t) => t.pl > 0).length;
+    const realizedPL = history.reduce((sum, t) => sum + t.pl, 0);
     return {
       account,
       stats: {
@@ -49,6 +50,7 @@ export function useTrading(): MockAccount {
         wins,
         winRate: trades === 0 ? 0 : (wins / trades) * 100,
         openPL: liveEngine.openPL(),
+        realizedPL,
       },
       positions,
       history,
