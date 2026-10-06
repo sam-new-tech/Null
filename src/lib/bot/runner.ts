@@ -30,6 +30,26 @@ export const XAUUSD_UNITS_PER_LOT = 100;
 const STATE_KEY = 'nullgrid.state';
 const LOG_KEY = 'nullgrid.logs';
 
+/**
+ * Strategy rules — the bot cannot do anything outside these, no matter
+ * what ticks arrive. Mirrors the verified sim (ATR10 x1.9 n10, TP 1 step,
+ * disaster SL 8 steps). Change only after re-running app-sim.ts green.
+ */
+export const STRATEGY_RULES = {
+  symbol: 'XAUUSD',
+  atrLen: 10,
+  gridMult: 1.9,
+  levels: 10,
+  tpSteps: 1,
+  disasterSteps: 8,
+  maxOrders: 20,
+  maxPositions: 20,
+  maxRiskPct: 3,
+  maxLotsPerLevel: 0.05,
+  maxDrawdownPct: 5,
+  maxEscapesPerHour: 3,
+} as const;
+
 export interface BotLogEntry {
   time: string;
   kind: 'info' | 'fill' | 'close' | 'escape' | 'error';
@@ -66,6 +86,8 @@ interface PersistedState {
   managedOrders: { id: string; side: 'buy' | 'sell'; price: number }[];
   managedPositions: { id: number; side: 'buy' | 'sell'; entry: number }[];
   startedAt: number | null;
+  startEquity: number | null;
+  escapeTimes: number[];
 }
 
 const DEFAULT_PERSISTED: PersistedState = {
@@ -81,6 +103,8 @@ const DEFAULT_PERSISTED: PersistedState = {
   managedOrders: [],
   managedPositions: [],
   startedAt: null,
+  startEquity: null,
+  escapeTimes: [],
 };
 
 function clockNow(): string {
@@ -222,6 +246,12 @@ class BotRunner {
     await this.load();
     if (this.persisted.state === 'running') return;
     if (!liveEngine.connected) throw new Error('Connect the trading account first');
+    if (this.persisted.symbol !== STRATEGY_RULES.symbol) {
+      throw new Error(`Strategy allows ${STRATEGY_RULES.symbol} only`);
+    }
+    if (!(riskPct > 0) || riskPct > STRATEGY_RULES.maxRiskPct) {
+      throw new Error(`Risk per level capped at ${STRATEGY_RULES.maxRiskPct}%`);
+    }
 
     const account = liveEngine.accountState();
     const snapshot = liveEngine.getSnapshot();
@@ -247,18 +277,23 @@ class BotRunner {
 
     const bars = await this.fetchBars(symbolId);
     const lastBar = bars[bars.length - 1];
-    const grid = buildGrid(bars, 10, 1.9, 10);
+    const grid = buildGrid(bars, STRATEGY_RULES.atrLen, STRATEGY_RULES.gridMult, STRATEGY_RULES.levels);
     // Width guard: refuse grids narrower than one M15 bar (escape-churn trap).
-    if (lastBar.high - lastBar.low > grid.step * 10) {
+    if (lastBar.high - lastBar.low > grid.step * STRATEGY_RULES.levels) {
       throw new Error(
-        `Grid too narrow for current volatility (bar $${(lastBar.high - lastBar.low).toFixed(2)} > range $${(grid.step * 10).toFixed(2)}) — try again later`,
+        `Grid too narrow for current volatility (bar $${(lastBar.high - lastBar.low).toFixed(2)} > range $${(grid.step * STRATEGY_RULES.levels).toFixed(2)}) — try again later`,
       );
     }
-    const atr = grid.step / 1.9;
+    const atr = grid.step / STRATEGY_RULES.gridMult;
     const marginPerLevel = (account.equity * riskPct) / 100;
     let volumeLots = lotsFor(marginPerLevel, lastBar.close, leverage, XAUUSD_UNITS_PER_LOT);
     // Hard cap: 20 max-open levels must fit in free margin with headroom.
-    const maxByMargin = account.freeMargin / (20 * ((lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage));
+    const maxByMargin =
+      account.freeMargin / (STRATEGY_RULES.levels * 2 * ((lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage));
+    volumeLots = Math.max(
+      0.01,
+      Math.min(volumeLots, STRATEGY_RULES.maxLotsPerLevel, Math.floor(maxByMargin * 100) / 100),
+    );
     volumeLots = Math.max(0.01, Math.min(volumeLots, Math.floor(maxByMargin * 100) / 100));
     if (volumeLots < 0.01) throw new Error('Free margin too low for one level');
 
@@ -275,6 +310,8 @@ class BotRunner {
       managedOrders: [],
       managedPositions: [],
       startedAt: Date.now(),
+      startEquity: account.equity,
+      escapeTimes: [],
     };
     this.barDir = isUpBar(lastBar) ? 'up' : 'down';
     this.lastBarTime = lastBar.time;
@@ -443,11 +480,11 @@ class BotRunner {
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     // Stagger placements ~250ms apart: 20 at once trips the server rate limit.
     for (const L of p.grid.lower) {
-      await this.place('buy', L, L + p.grid.step, L - 8 * p.grid.step);
+      await this.place('buy', L, L + STRATEGY_RULES.tpSteps * p.grid.step, L - STRATEGY_RULES.disasterSteps * p.grid.step);
       await sleep(250);
     }
     for (const U of p.grid.upper) {
-      await this.place('sell', U, U - p.grid.step, U + 8 * p.grid.step);
+      await this.place('sell', U, U - STRATEGY_RULES.tpSteps * p.grid.step, U + STRATEGY_RULES.disasterSteps * p.grid.step);
       await sleep(250);
     }
   }
@@ -463,6 +500,28 @@ class BotRunner {
 
   private async place(side: 'buy' | 'sell', level: number, tp: number, sl: number): Promise<void> {
     const p = this.persisted;
+    if (p.state !== 'running' || !p.grid) return;
+    // Rule: nothing outside the strategy book.
+    if (p.managedOrders.length >= STRATEGY_RULES.maxOrders) {
+      this.log('error', `Order cap ${STRATEGY_RULES.maxOrders} hit — placement blocked`);
+      return;
+    }
+    if (p.managedPositions.length >= STRATEGY_RULES.maxPositions) {
+      this.log('error', `Position cap ${STRATEGY_RULES.maxPositions} hit — placement blocked`);
+      return;
+    }
+    if (!(p.volumeLots > 0) || p.volumeLots > STRATEGY_RULES.maxLotsPerLevel) {
+      this.log('error', 'Lot size outside strategy limits — placement blocked');
+      return;
+    }
+    const step = p.grid.step;
+    const expectTp = side === 'buy' ? level + STRATEGY_RULES.tpSteps * step : level - STRATEGY_RULES.tpSteps * step;
+    const expectSl =
+      side === 'buy' ? level - STRATEGY_RULES.disasterSteps * step : level + STRATEGY_RULES.disasterSteps * step;
+    if (Math.abs(tp - expectTp) > step * 0.01 || Math.abs(sl - expectSl) > step * 0.01) {
+      this.log('error', 'Order shape outside strategy (TP/SL mismatch) — placement blocked');
+      return;
+    }
     const lv = this.round(level);
     const pair = placeLimitOrder(this.accountId(), {
       symbolId: p.symbolId,
@@ -496,6 +555,14 @@ class BotRunner {
     // Cooldown: never escape twice within 60s (protects against bad data storms).
     if (Date.now() - this.lastEscapeAt < 60000) return;
     this.lastEscapeAt = Date.now();
+    // Circuit breaker: too many escapes in a rolling hour = wrong regime — halt.
+    const recent = [...(p.escapeTimes ?? []), Date.now()].filter((t) => Date.now() - t < 3600000);
+    if (recent.length > STRATEGY_RULES.maxEscapesPerHour) {
+      this.log('error', `Circuit breaker: ${recent.length} escapes/hour — stopping, restart manually when calm`);
+      await this.stopAll();
+      return;
+    }
+    this.persisted = { ...p, escapeTimes: recent };
     this.log('escape', `Price left the grid at ${price.toFixed(2)} — flattening and re-anchoring`);
     try {
       const res = await liveEngine.execRequest(Payload.ReconcileReq, {
@@ -521,19 +588,19 @@ class BotRunner {
     const bars = await this.fetchBars(p.symbolId);
     const lastBar = bars[bars.length - 1];
     // Widen until the grid covers one M15 bar (max mult 3.0), else keep old grid.
-    let grid = buildGrid(bars, 10, 1.9, 10);
+    let grid = buildGrid(bars, STRATEGY_RULES.atrLen, STRATEGY_RULES.gridMult, STRATEGY_RULES.levels);
     for (const mult of [2.2, 2.6, 3.0]) {
-      if (lastBar.high - lastBar.low <= grid.step * 10) break;
-      grid = buildGrid(bars, 10, mult, 10);
+      if (lastBar.high - lastBar.low <= grid.step * STRATEGY_RULES.levels) break;
+      grid = buildGrid(bars, STRATEGY_RULES.atrLen, mult, STRATEGY_RULES.levels);
     }
-    if (lastBar.high - lastBar.low > grid.step * 10) {
+    if (lastBar.high - lastBar.low > grid.step * STRATEGY_RULES.levels) {
       this.log('error', 'Volatility too high — keeping old grid instead of churning');
       return;
     }
     this.persisted = {
-      ...p,
+      ...this.persisted,
       grid,
-      atr: grid.step / 1.9,
+      atr: grid.step / STRATEGY_RULES.gridMult,
       managedOrders: [],
       managedPositions: [],
     };
@@ -562,6 +629,17 @@ class BotRunner {
       const res = await liveEngine.execRequest(Payload.ReconcileReq, {
         ctidTraderAccountId: accountId,
       });
+      // Rule: max drawdown from start equity — halt before deeper damage.
+      const startEq = this.persisted.startEquity;
+      const liveEq = liveEngine.accountState().equity;
+      if (startEq && startEq > 0 && liveEq < startEq * (1 - STRATEGY_RULES.maxDrawdownPct / 100)) {
+        this.log(
+          'error',
+          `Drawdown cap ${STRATEGY_RULES.maxDrawdownPct}% hit — stopping, restart manually when calm`,
+        );
+        await this.stopAll();
+        return true;
+      }
     const positions = ((res.position ?? []) as {
       positionId: number;
       tradeData: { label?: string; tradeSide: number | string; volume: number };
