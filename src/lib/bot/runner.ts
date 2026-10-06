@@ -312,21 +312,55 @@ class BotRunner {
     }
   }
 
-  /** Stop: cancel our limits, leave positions to their server-side TPs. */
+  /** Stop: cancel ALL our limits and close ALL our positions. Manual trades are untouched. */
   async stop(): Promise<void> {
     await this.load();
     if (this.persisted.state === 'stopped') return;
-    await this.cancelManagedOrders();
+    const p = this.persisted;
+    const units = unitsPerLot(p.symbol);
+    try {
+      const accountId = this.accountId();
+      const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
+      const managedIds = new Set(p.managedPositions.map((m) => m.id));
+      const open = ((res.position ?? []) as {
+        positionId: number;
+        tradeData: { volume: number; label?: string };
+      }[]).filter((pos) => managedIds.has(Number(pos.positionId)));
+      const resting = ((res.order ?? []) as {
+        orderId: number;
+        tradeData: { label?: string };
+      }[]).filter((o) =>
+        typeof o.tradeData.label === 'string' && o.tradeData.label.startsWith(BOT_LABEL_PREFIX),
+      );
+      for (const pos of open) {
+        try {
+          const pair = closePosition(accountId, pos.positionId, pos.tradeData.volume / (units * 100), units);
+          liveEngine.execSend(pair.type, pair.payload);
+        } catch {
+          // Best effort per position.
+        }
+      }
+      for (const o of resting) {
+        try {
+          const pair = cancelOrder(accountId, o.orderId);
+          liveEngine.execSend(pair.type, pair.payload);
+        } catch {
+          // Best effort per order.
+        }
+      }
+      this.log('info', `Stopped — flattened ${open.length} positions, cancelled ${resting.length} limits`);
+    } catch (err) {
+      this.log('error', `Stop incomplete: ${err instanceof Error ? err.message : 'connection failed'} — retry Stop`);
+    }
     if (this.spotUnsub) this.spotUnsub();
     if (this.execUnsub) this.execUnsub();
     if (this.orderErrUnsub) this.orderErrUnsub();
     this.spotUnsub = null;
     this.execUnsub = null;
     this.orderErrUnsub = null;
-    this.persisted = { ...this.persisted, state: 'stopped', managedOrders: [] };
+    this.persisted = { ...p, state: 'stopped', managedOrders: [], managedPositions: [] };
     this.stopReconcileLoop();
     await this.persist();
-    this.log('info', 'Bot stopped — limits cancelled, positions left to TPs');
     this.emit();
   }
 
