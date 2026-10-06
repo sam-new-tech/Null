@@ -5,7 +5,7 @@ import { router } from 'expo-router';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { LogoMark } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { REDIRECT_URI } from '@/lib/ctrader/config';
+import { redirectUri } from '@/lib/ctrader/config';
 import { useAuth } from '@/context/auth';
 import { Button } from 'panelui-native/components/button';
 import { Input } from 'panelui-native/components/input';
@@ -101,7 +101,7 @@ export default function LoginScreen() {
         )}
         {__DEV__ ? (
           <Text size="xs" muted className="text-center font-mono">
-            {REDIRECT_URI}
+            {redirectUri()}
           </Text>
         ) : null}
       </View>

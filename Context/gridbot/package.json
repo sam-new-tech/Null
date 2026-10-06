@@ -1,0 +1,28 @@
+{
+  "name": "grid-backtest",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Grid strategy (Fixed + ATR) backtester in TypeScript — port of Pine Visual Lab docs",
+  "scripts": {
+    "backtest": "tsx src/run.ts",
+    "backtest:csv": "tsx src/run.ts --csv",
+    "optimize": "tsx src/optimize.ts",
+    "walkforward": "tsx src/walkforward.ts",
+    "timeframes": "tsx src/timeframes.ts",
+    "dukascopy": "tsx src/dukascopy.ts",
+    "fetch": "tsx src/fetch.ts",
+    "forex": "tsx src/forex.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/sanity.ts"
+  },
+  "dependencies": {
+    "dukascopy-node": "^1.50.0",
+    "technicalindicators": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

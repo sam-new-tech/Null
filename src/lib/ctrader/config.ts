@@ -127,17 +127,25 @@ async function parseTokenResponse(res: Response): Promise<TokenResponse> {
   };
 }
 
-/** Portal only accepts https:// — go through the Expo auth proxy (samuwayo). */
+/** Portal only accepts https:// — go through the Expo auth proxy (samuwayo).
+ *  Currently used as the native return target until universal links exist. */
 const PROXY_URI = 'https://auth.expo.io/@samuwayo/null';
 
 /**
  * Where Spotware redirects with ?code=.
  * Override with EXPO_PUBLIC_CTRADER_REDIRECT_URI (e.g. production web origin).
- * Uses an already-registered portal URI: after Allow access the user copies
+ * Web: an already-registered portal URI — after Allow access the user copies
  * that URL and pastes it into the app (manual flow, no popup tricks needed).
+ * Native: the Expo proxy (portal-registered); the proxy forwards to the app.
  */
-export const REDIRECT_URI =
-  process.env.EXPO_PUBLIC_CTRADER_REDIRECT_URI ?? 'https://openapi.ctrader.com';
+export const MANUAL_REDIRECT_URI = 'https://openapi.ctrader.com';
+
+export function redirectUri(): string {
+  return (
+    process.env.EXPO_PUBLIC_CTRADER_REDIRECT_URI ??
+    (Platform.OS === 'web' ? MANUAL_REDIRECT_URI : PROXY_URI)
+  );
+}
 
 /**
  * Where THIS app listens for the redirect back.
@@ -145,5 +153,5 @@ export const REDIRECT_URI =
  * (the proxy forwards there; needs the EAS-linked project for scheme lookup).
  */
 export function returnUrl(): string {
-  return Platform.OS === 'web' ? REDIRECT_URI : 'xliquid://oauth';
+  return Platform.OS === 'web' ? redirectUri() : 'xliquid://oauth';
 }

@@ -9,6 +9,8 @@ import { useEffect } from 'react';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AuthProvider, useAuth } from '@/context/auth';
+// Registers the grid background task at launch (no-op until the bot starts it).
+import '@/lib/bot/background';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -18,7 +20,7 @@ function AuthGuard() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const inAuth = segments[0] === '(auth)' || segments[0] === 'oauth';
+    const inAuth = segments[0] === '(auth)';
     if (!connected && !inAuth) router.replace('/(auth)/login');
     else if (connected && inAuth) router.replace('/(tabs)');
   }, [connected, hydrated, segments]);

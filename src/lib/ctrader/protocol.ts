@@ -21,8 +21,7 @@ export const Payload = {
   SpotEvent: 2131,
   DealListReq: 2133,
   DealListRes: 2134,
-  ErrorRes: 2142,
-  GetAccountsByAccessTokenReq: 2149,
+  ErrorRes: 2142,  GetAccountsByAccessTokenReq: 2149,
   GetAccountsByAccessTokenRes: 2150,
   AccountLogoutReq: 2162,
   AccountLogoutRes: 2163,
@@ -30,6 +29,8 @@ export const Payload = {
   RefreshTokenRes: 2174,
   SymbolsListReq: 2114,
   SymbolsListRes: 2115,
+  GetTrendbarsReq: 2137,
+  GetTrendbarsRes: 2138,
 } as const;
 
 export const TradeSide = { BUY: 1, SELL: 2 } as const;

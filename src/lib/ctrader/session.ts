@@ -1,5 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
+import { storeDel, storeGet, storeSet } from '../storage';
 
 export interface CTraderSession {
   accessToken: string;
@@ -19,59 +18,19 @@ const KEYS = {
 } as const;
 
 /**
- * Token vault. Native: SecureStore (Keychain / EncryptedSharedPreferences).
- * Web: localStorage (SecureStore has no usable web backend here).
- * Memory fallback keeps the UI working if both fail.
+ * Token vault. Backend is storage.ts (SecureStore native, localStorage web,
+ * memory fallback). Keys unchanged (shared with older installs).
  */
-let memory: Partial<Record<keyof typeof KEYS, string>> = {};
-
-const webStore =
-  Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage
-    ? window.localStorage
-    : null;
-
 async function get(key: keyof typeof KEYS): Promise<string | null> {
-  if (webStore) return webStore.getItem(KEYS[key]) ?? memory[key] ?? null;
-  try {
-    const value = await SecureStore.getItemAsync(KEYS[key]);
-    if (value !== null) return value;
-  } catch {
-    // Fall through to memory.
-  }
-  return memory[key] ?? null;
+  return storeGet(KEYS[key]);
 }
 
 async function set(key: keyof typeof KEYS, value: string): Promise<void> {
-  if (webStore) {
-    try {
-      webStore.setItem(KEYS[key], value);
-      return;
-    } catch {
-      memory[key] = value;
-      return;
-    }
-  }
-  try {
-    await SecureStore.setItemAsync(KEYS[key], value);
-  } catch {
-    memory[key] = value;
-  }
+  await storeSet(KEYS[key], value);
 }
 
 async function del(key: keyof typeof KEYS): Promise<void> {
-  delete memory[key];
-  if (webStore) {
-    try {
-      webStore.removeItem(KEYS[key]);
-    } catch {
-      // Ignore.
-    }
-  }
-  try {
-    await SecureStore.deleteItemAsync(KEYS[key]);
-  } catch {
-    // Ignore — memory already cleared.
-  }
+  await storeDel(KEYS[key]);
 }
 
 export async function saveSession(session: CTraderSession): Promise<void> {
@@ -106,5 +65,4 @@ export async function clearSession(): Promise<void> {
   await Promise.all(
     (Object.keys(KEYS) as (keyof typeof KEYS)[]).map((key) => del(key)),
   );
-  memory = {};
 }

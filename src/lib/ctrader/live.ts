@@ -78,51 +78,97 @@ class LiveEngine {
     return this.snapshot.status === 'ready';
   }
 
+  /** Low-level passthroughs so the bot runner shares this single connection. */
+  execRequest(type: number, payload: Record<string, unknown>) {
+    return this.request(type, payload);
+  }
+
+  execSend(type: number, payload: Record<string, unknown>): void {
+    this.client.send(type, payload);
+  }
+
+  onEvent(type: number, handler: (payload: Record<string, unknown>) => void): () => void {
+    return this.client.on(type, handler);
+  }
+
+  getAccountId(): number | null {
+    return this.session?.ctidTraderAccountId ?? null;
+  }
+
+  /** Shared handshake: fresh tokens → socket → app auth → account auth. */
+  static async prepareConnection(
+    client: CTraderClient,
+    session: CTraderSession,
+  ): Promise<{ session: CTraderSession; accountId: number }> {
+    let active = session;
+    if (active.expiresAt < Date.now() + 60000) {
+      const tokens = await refreshTokens(active.refreshToken);
+      active = {
+        ...active,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: Date.now() + tokens.expiresIn * 1000,
+      };
+      await saveSession(active);
+    }
+    client.close();
+    client.connect(socketUrl(active.isLive ? 'live' : 'demo'));
+    await LiveEngine.waitOpen(client);
+    await client.request(Payload.ApplicationAuthReq, {
+      clientId: CTRADER_CLIENT_ID,
+      clientSecret: CTRADER_CLIENT_SECRET,
+    });
+    const accounts = await client.request(Payload.GetAccountsByAccessTokenReq, {
+      accessToken: active.accessToken,
+    });
+    const list = (accounts.ctidTraderAccount as AccountInfo[] | undefined) ?? [];
+    const match =
+      list.find((a) => a.ctidTraderAccountId === active.ctidTraderAccountId) ?? list[0];
+    if (!match) throw new Error('No trading account granted access');
+    const accountId = match.ctidTraderAccountId;
+    const authed = { ...active, ctidTraderAccountId: accountId };
+    await saveSession(authed);
+    await client.request(Payload.AccountAuthReq, {
+      ctidTraderAccountId: accountId,
+      accessToken: active.accessToken,
+    });
+    return { session: authed, accountId };
+  }
+
+  private static waitOpen(client: CTraderClient): Promise<void> {
+    if (client.state === 'open') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Connection timed out')), 20000);
+      client.onStateChange = (state) => {
+        if (state === 'open') {
+          clearTimeout(timer);
+          client.onStateChange = null;
+          resolve();
+        }
+      };
+    });
+  }
+
   /** Full login sequence: tokens → socket → app auth → account auth → snapshot. */
   async start(session: CTraderSession): Promise<void> {
     if (this.starting) return;
     this.starting = true;
     this.emit({ status: 'connecting', error: null });
     try {
-      let active = session;
-      if (active.expiresAt < Date.now() + 60000) {
-        const tokens = await refreshTokens(active.refreshToken);
-        active = {
-          ...active,
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          expiresAt: Date.now() + tokens.expiresIn * 1000,
-        };
-        await saveSession(active);
-      }
+      const { session: active, accountId } = await LiveEngine.prepareConnection(
+        this.client,
+        session,
+      );
       this.session = active;
-      this.client.close();
-      this.client.connect(socketUrl(active.isLive ? 'live' : 'demo'));
-
-      await this.waitOpen();
-      await this.request(Payload.ApplicationAuthReq, {
-        clientId: CTRADER_CLIENT_ID,
-        clientSecret: CTRADER_CLIENT_SECRET,
-      });
       const accounts = await this.request(Payload.GetAccountsByAccessTokenReq, {
         accessToken: active.accessToken,
       });
-      const list = (accounts.ctidTraderAccount as AccountInfo[] | undefined) ?? [];
-      const match =
-        list.find((a) => a.ctidTraderAccountId === active.ctidTraderAccountId) ?? list[0];
-      if (!match) throw new Error('No trading account granted access');
-      const accountId = match.ctidTraderAccountId;
-      this.session = { ...active, ctidTraderAccountId: accountId };
-      await saveSession(this.session);
-
-      await this.request(Payload.AccountAuthReq, {
-        ctidTraderAccountId: accountId,
-        accessToken: active.accessToken,
-      });
-
+      const match = ((accounts.ctidTraderAccount as AccountInfo[] | undefined) ?? []).find(
+        (a) => a.ctidTraderAccountId === accountId,
+      );
       this.attachEvents(accountId);
       await this.snapshotAll(accountId);
-      this.emit({ status: 'ready', account: match });
+      this.emit({ status: 'ready', account: match ?? null });
       this.startLightRefresh();
     } catch (err) {
       this.emit({
@@ -151,20 +197,6 @@ class LiveEngine {
 
   private request(type: number, payload: Record<string, unknown>) {
     return this.client.request(type, payload);
-  }
-
-  private waitOpen(): Promise<void> {
-    if (this.client.state === 'open') return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Connection timed out')), 20000);
-      this.client.onStateChange = (state) => {
-        if (state === 'open') {
-          clearTimeout(timer);
-          this.client.onStateChange = null;
-          resolve();
-        }
-      };
-    });
   }
 
   private attachEvents(accountId: number): void {
@@ -319,6 +351,8 @@ class LiveEngine {
 }
 
 export const liveEngine = new LiveEngine();
+
+export { LiveEngine };
 
 export function useLive(): LiveSnapshot {
   return useSyncExternalStore(liveEngine.subscribe, liveEngine.getSnapshot);
