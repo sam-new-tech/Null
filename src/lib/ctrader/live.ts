@@ -7,6 +7,7 @@ import {
   socketUrl,
 } from './config';
 import { Payload } from './protocol';
+import { isOpenPositionStatus, isRestingOrderStatus } from './orders';
 import type {
   AccountInfo,
   DealInfo,
@@ -252,11 +253,11 @@ class LiveEngine {
       if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: 2 });
     });
 
-    const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter(
-      (p) => p.positionStatus === 'POSITION_STATUS_OPEN' || p.positionStatus === undefined,
+    const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter((p) =>
+      isOpenPositionStatus(p.positionStatus),
     );
-    const orders = ((reconcileRes.order ?? []) as OrderInfo[]).filter(
-      (o) => o.orderStatus === 'ORDER_STATUS_ACCEPTED' || o.orderStatus === undefined,
+    const orders = ((reconcileRes.order ?? []) as OrderInfo[]).filter((o) =>
+      isRestingOrderStatus(o.orderStatus),
     );
 
     // Subscribe spots for open symbols (+ conversion helpers).

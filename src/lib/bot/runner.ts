@@ -7,6 +7,10 @@ import { loadSession } from '../ctrader/session';
 import {
   cancelOrder,
   closePosition,
+  isCancelRejectedStatus,
+  isFilledStatus,
+  isRejectedStatus,
+  isRestingOrderStatus,
   mapTrendbars,
   placeLimitOrder,
   TrendbarPeriod,
@@ -295,6 +299,16 @@ class BotRunner {
     await this.placeFullGrid();
     this.startReconcileLoop();
     this.emit();
+    // Verify against the broker: reconcile once and report what is resting.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    try {
+      await this.reconcile();
+      const resting = this.persisted.managedOrders.length;
+      this.log('info', resting > 0 ? `${resting}/8 resting confirmed at broker` : 'Broker shows no resting limits — check rejections above');
+      this.emit();
+    } catch {
+      // Reconcile loop covers it.
+    }
   }
 
   /** Stop: cancel our limits, leave positions to their server-side TPs. */
@@ -590,7 +604,7 @@ class BotRunner {
 
     if (
       order &&
-      (order.orderStatus === 'ORDER_REJECTED' || order.orderStatus === 'ORDER_CANCEL_REJECTED')
+      (isRejectedStatus(order.orderStatus) || isCancelRejectedStatus(order.orderStatus))
     ) {
       const code = (payload.errorCode as string | undefined) ?? order.orderStatus;
       this.log('error', `Order ${String(order.orderId ?? '?')} rejected: ${code}`);
@@ -598,7 +612,7 @@ class BotRunner {
       this.emit();
     }
 
-    if (order && mine && order.orderStatus === 'ORDER_STATUS_FILLED' && order.orderId !== undefined) {
+    if (order && mine && isFilledStatus(order.orderStatus) && order.orderId !== undefined) {
       this.log('fill', `Filled ${String(order.orderId)} (${label})`);
       const pid = position?.positionId ?? deal?.positionId;
       const side = order.tradeData?.tradeSide === 2 || order.tradeData?.tradeSide === 'SELL' ? 'sell' : 'buy';

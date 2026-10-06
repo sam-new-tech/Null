@@ -255,6 +255,32 @@ export function asSide(value: unknown): 'buy' | 'sell' {
   return 'buy';
 }
 
+function statusIs(value: unknown, name: string, num: number): boolean {
+  return value === undefined || value === name || value === num || value === String(num);
+}
+
+/** Open positions: string names or numeric enum values both accepted. */
+export function isOpenPositionStatus(value: unknown): boolean {
+  return statusIs(value, 'POSITION_STATUS_OPEN', 1);
+}
+
+/** Resting (working) limit/stop orders. */
+export function isRestingOrderStatus(value: unknown): boolean {
+  return statusIs(value, 'ORDER_STATUS_ACCEPTED', 1);
+}
+
+export function isFilledStatus(value: unknown): boolean {
+  return value === 'ORDER_STATUS_FILLED' || value === 2 || value === '2';
+}
+
+export function isRejectedStatus(value: unknown): boolean {
+  return value === 'ORDER_REJECTED' || value === 7 || value === '7';
+}
+
+export function isCancelRejectedStatus(value: unknown): boolean {
+  return value === 'ORDER_CANCEL_REJECTED' || value === 8 || value === '8';
+}
+
 export interface Trendbar {
   /** Bar open time, Unix milliseconds. */
   time: number;
