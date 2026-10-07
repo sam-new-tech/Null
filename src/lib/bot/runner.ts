@@ -24,7 +24,7 @@ import {
   dcaNextAdd,
   dcaTarget,
   isUpBar,
-  lotsFor,
+  lotsForEquity,
   planTick,
   type Bar,
   type GridSetup,
@@ -53,7 +53,8 @@ export const STRATEGY_RULES = {
   maxBooksPerSide: 3,
   maxOrders: 20,
   maxPositions: 20,
-  maxRiskPct: 3,
+  /** Auto lots: 0.01 per $500 equity, hard-capped per leg. */
+  equityStep: 500,
   maxLotsPerLevel: 0.05,
   maxDrawdownPct: 5,
   maxEscapesPerHour: 3,
@@ -277,16 +278,13 @@ class BotRunner {
     return closed.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
   }
 
-  /** Start the bot: build the grid from live ATR and place the 20 limits. */
-  async start(riskPct: number): Promise<void> {
+  /** Start the bot: lots auto-scale from equity, grid from live ATR. */
+  async start(): Promise<void> {
     await this.load();
     if (this.persisted.state === 'running') return;
     if (!liveEngine.connected) throw new Error('Connect the trading account first');
     if (this.persisted.symbol !== STRATEGY_RULES.symbol) {
       throw new Error(`Strategy allows ${STRATEGY_RULES.symbol} only`);
-    }
-    if (!(riskPct > 0) || riskPct > STRATEGY_RULES.maxRiskPct) {
-      throw new Error(`Risk per level capped at ${STRATEGY_RULES.maxRiskPct}%`);
     }
 
     const account = liveEngine.accountState();
@@ -321,23 +319,20 @@ class BotRunner {
       );
     }
     const atr = grid.step / STRATEGY_RULES.gridMult;
-    const marginPerLevel = (account.equity * riskPct) / 100;
-    let volumeLots = lotsFor(marginPerLevel, lastBar.close, leverage, XAUUSD_UNITS_PER_LOT);
-    // Hard cap: 20 max-open levels must fit in free margin with headroom.
+    // Auto lots: 0.01 per $500 equity, scaled and capped — then margin-checked.
+    let volumeLots = lotsForEquity(account.equity, STRATEGY_RULES.maxLotsPerLevel);
     const maxByMargin =
       account.freeMargin / (STRATEGY_RULES.levels * 2 * ((lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage));
-    volumeLots = Math.max(
-      0.01,
-      Math.min(volumeLots, STRATEGY_RULES.maxLotsPerLevel, Math.floor(maxByMargin * 100) / 100),
-    );
-    if (volumeLots < 0.01) throw new Error('Free margin too low for one level');
+    volumeLots = Math.max(0.01, Math.min(volumeLots, Math.floor(maxByMargin * 100) / 100));
+    if (volumeLots < 0.01) throw new Error('Free margin too low for one leg');
+    const marginPerLeg = (volumeLots * lastBar.close * XAUUSD_UNITS_PER_LOT) / leverage;
 
     this.persisted = {
       ...this.persisted,
       state: 'running',
       symbolId,
       digits,
-      riskPct,
+      riskPct: account.equity > 0 ? (marginPerLeg / account.equity) * 100 : 0,
       volumeLots,
       leverage,
       grid,
@@ -353,7 +348,7 @@ class BotRunner {
     this.lastBarTime = lastBar.time;
     this.lastPrice = null;
     await this.persist();
-    this.log('info', `DCA armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/leg, ${STRATEGY_RULES.maxAdds} adds, basket ${STRATEGY_RULES.basketSteps} step, risk ${riskPct}%`);
+    this.log('info', `DCA armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/leg (equity $${account.equity.toFixed(2)}), ${STRATEGY_RULES.maxAdds} adds, basket ${STRATEGY_RULES.basketSteps} step`);
 
     liveEngine.execSend(Payload.SubscribeSpotsReq, {
       ctidTraderAccountId: this.accountId(),

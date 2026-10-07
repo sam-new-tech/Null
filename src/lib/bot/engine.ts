@@ -208,6 +208,14 @@ export function crossedLevel(side: 'buy' | 'sell', level: number, prevPrice: num
   return side === 'buy' ? prevPrice > level && price <= level : prevPrice < level && price >= level;
 }
 
+// Auto lots from equity (video-EA style compounding): 0.01 lots per $500,
+// floored to 0.01, capped. Scales up as equity grows, never exceeds cap.
+export function lotsForEquity(equity: number, cap = 0.05): number {
+  if (!Number.isFinite(equity) || equity <= 0) return 0.01;
+  const lots = Math.floor(equity / 500) * 0.01;
+  return Math.min(cap, Math.max(0.01, Math.floor(lots * 100) / 100));
+}
+
 // lots = marginPerLevel x leverage / (price x unitsPerLot), floored to
 // 0.01, min 0.01. Returns 0 on invalid inputs. Total: never throws.
 export function lotsFor(marginPerLevel: number, price: number, leverage: number, unitsPerLot: number): number {

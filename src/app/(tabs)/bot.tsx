@@ -11,7 +11,8 @@ import Animated, {
 import { ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
-import { botRunner } from '@/lib/bot/runner';
+import { botRunner, STRATEGY_RULES } from '@/lib/bot/runner';
+import { lotsForEquity } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
@@ -19,7 +20,6 @@ import { Dialog } from 'panelui-native/components/dialog';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
 import { formatMoney } from '@/hooks/use-mock-account';
-import { Input } from 'panelui-native/components/input';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 
@@ -77,7 +77,6 @@ export default function BotScreen() {
   useSyncExternalStore(botRunner.subscribe, botRunner.getRevision);
   const status = botRunner.getStatus();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [riskText, setRiskText] = useState('2');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -88,16 +87,14 @@ export default function BotScreen() {
   const running = status.state === 'running';
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
-  const riskPct = Number(riskText.replace(',', '.'));
-  const riskValid = Number.isFinite(riskPct) && riskPct > 0 && riskPct <= 3;
-  const stakePreview = riskValid ? (equity * riskPct) / 100 : 0;
+  const autoLots = lotsForEquity(equity, STRATEGY_RULES.maxLotsPerLevel);
 
   const confirmStart = async () => {
-    if (!riskValid || starting) return;
+    if (starting) return;
     setStarting(true);
     setStartError(null);
     try {
-      await botRunner.start(riskPct);
+      await botRunner.start();
       await registerGridTask();
       setSheetOpen(false);
     } catch (err) {
@@ -144,22 +141,10 @@ export default function BotScreen() {
         </View>
         <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
           <Dialog.Content>
-            <Dialog.Title>Risk per level</Dialog.Title>
+            <Dialog.Title>Auto lots</Dialog.Title>
             <Dialog.Description>
-              {`Stake per grid level as % of equity ($${equity.toFixed(2)}). Max 10 levels/side, 0.05 lots/level cap.`}
+              {`Lots scale from equity ($${equity.toFixed(2)}): 0.01 per $500, capped at ${STRATEGY_RULES.maxLotsPerLevel.toFixed(2)}. This arm: ${autoLots.toFixed(2)} lots/leg · up to 7 legs/book · XAUUSD M30 · DCA.`}
             </Dialog.Description>
-            <Input
-              label="Risk %"
-              value={riskText}
-              onChangeText={setRiskText}
-              keyboardType="decimal-pad"
-              errorMessage={!riskValid && riskText.length > 0 ? 'Enter 0–3' : undefined}
-            />
-            {riskValid && (
-              <Text size="sm" muted>
-                {`≈ $${stakePreview.toFixed(2)} margin per leg · up to 7 legs/book (≈ $${(stakePreview * 7).toFixed(2)} max) · XAUUSD M30 · DCA grid`}
-              </Text>
-            )}
             {startError ? (
               <Text size="sm" className="text-destructive">
                 {startError}
@@ -169,8 +154,8 @@ export default function BotScreen() {
               <Dialog.Close>
                 <Button variant="outline">Cancel</Button>
               </Dialog.Close>
-              <Button disabled={!riskValid || starting} loading={starting} onPress={confirmStart}>
-                Arm grid
+              <Button disabled={!canArm || starting} loading={starting} onPress={confirmStart}>
+                Arm DCA
               </Button>
             </Dialog.Footer>
           </Dialog.Content>
