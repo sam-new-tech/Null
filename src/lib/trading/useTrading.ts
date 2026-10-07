@@ -1,6 +1,6 @@
 import { useMockAccount, type MockAccount } from '@/hooks/use-mock-account';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
-import { unitsPerLot } from '@/lib/ctrader/orders';
+import { asSide, unitsPerLot } from '@/lib/ctrader/orders';
 
 /**
  * Single data source for all trading screens.
@@ -20,7 +20,7 @@ export function useTrading(): MockAccount & { live: boolean } {
     const positions = live.positions.map((p) => ({
       id: Number(p.positionId),
       symbol: nameOf(p.tradeData.symbolId),
-      side: (p.tradeData.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
+      side: asSide(p.tradeData.tradeSide),
       volume: lotsOf(p.tradeData.symbolId, p.tradeData.volume),
       rawVolume: p.tradeData.volume,
       pl: liveEngine.unrealized(p),
@@ -37,7 +37,7 @@ export function useTrading(): MockAccount & { live: boolean } {
       return {
         id: Number(deal.dealId),
         symbol: nameOf(deal.symbolId),
-        side: (deal.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
+        side: asSide(deal.tradeSide),
         volume: lotsOf(deal.symbolId, deal.volume),
         pl: (detail.grossProfit + detail.swap + detail.commission) / scale,
         time: at.toLocaleTimeString('en-GB'),
@@ -48,7 +48,7 @@ export function useTrading(): MockAccount & { live: boolean } {
     const orders = live.orders.map((o) => ({
       id: String(o.orderId),
       symbol: nameOf(o.tradeData.symbolId),
-      side: (o.tradeData.tradeSide === 1 ? 'buy' : 'sell') as 'buy' | 'sell',
+      side: asSide(o.tradeData.tradeSide),
       volume: lotsOf(o.tradeData.symbolId, o.tradeData.volume),
       limitPrice: o.limitPrice ?? 0,
       stopLoss: o.stopLoss ?? 0,
