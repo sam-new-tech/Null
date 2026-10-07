@@ -323,6 +323,7 @@ class BotRunner {
       ctidTraderAccountId: this.accountId(),
       symbolId: [symbolId],
     });
+    liveEngine.ensureSpots([symbolId]);
     if (this.spotUnsub) this.spotUnsub();
     this.spotUnsub = liveEngine.onEvent(Payload.SpotEvent, (payload) => {
       if (payload.symbolId !== symbolId) return;

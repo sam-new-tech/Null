@@ -172,6 +172,7 @@ class LiveEngine {
       );
       this.attachEvents(accountId);
       await this.snapshotAll(accountId, true);
+      this.watchConnection();
       this.emit({ status: 'ready', account: match ?? null });
       this.startLightRefresh();
     } catch (err) {
@@ -186,6 +187,7 @@ class LiveEngine {
 
   stop(): void {
     this.stopLightRefresh();
+    this.client.onStateChange = null;
     this.client.close();
     this.session = null;
     this.spots.clear();
@@ -203,31 +205,108 @@ class LiveEngine {
     return this.client.request(type, payload);
   }
 
+  private eventUnsubs: (() => void)[] = [];
+
   private attachEvents(accountId: number): void {
+    this.eventUnsubs.forEach((off) => off());
+    this.eventUnsubs = [];
     // Position/balance changes: refresh the snapshot (simple + robust).
-    this.client.on(Payload.ExecutionEvent, () => {
-      void this.snapshotAll(accountId);
-    });
-    this.client.on(Payload.TraderUpdatedEvent, (payload) => {
-      const trader = payload.trader as TraderInfo | undefined;
-      if (trader) this.emit({ trader });
-    });
+    // A close also stales the deals list so History updates in realtime.
+    this.eventUnsubs.push(
+      this.client.on(Payload.ExecutionEvent, (payload) => {
+        const deal = payload.deal as { closePositionDetail?: object } | undefined;
+        if (deal?.closePositionDetail) this.lastDealsAt = 0;
+        void this.snapshotAll(accountId);
+      }),
+    );
+    this.eventUnsubs.push(
+      this.client.on(Payload.TraderUpdatedEvent, (payload) => {
+        const trader = payload.trader as TraderInfo | undefined;
+        if (trader) this.emit({ trader });
+      }),
+    );
     // Spots stream into a map; a 2s light tick re-renders P/L (no per-tick setState).
-    this.client.on(Payload.SpotEvent, (payload) => {
-      const symbolId = payload.symbolId as number;
-      const bid = payload.bid as number | undefined;
-      const ask = payload.ask as number | undefined;
-      if (symbolId !== undefined && (bid !== undefined || ask !== undefined)) {
-        this.spots.set(symbolId, {
-          bid: (bid ?? ask ?? 0) / 100000,
-          ask: (ask ?? bid ?? 0) / 100000,
-        });
-      }
-    });
+    this.eventUnsubs.push(
+      this.client.on(Payload.SpotEvent, (payload) => {
+        const symbolId = payload.symbolId as number;
+        const bid = payload.bid as number | undefined;
+        const ask = payload.ask as number | undefined;
+        if (symbolId !== undefined && (bid !== undefined || ask !== undefined)) {
+          this.spots.set(symbolId, {
+            bid: (bid ?? ask ?? 0) / 100000,
+            ask: (ask ?? bid ?? 0) / 100000,
+          });
+        }
+      }),
+    );
   }
 
+  /** Extra spot subscriptions (e.g. the bot's grid symbol) kept across snapshots. */
+  private extraSpots = new Set<number>();
+  private reauthing = false;
+
+  ensureSpots(symbolIds: number[]): void {
+    let added = false;
+    for (const id of symbolIds) {
+      if (!this.extraSpots.has(id)) {
+        this.extraSpots.add(id);
+        added = true;
+      }
+    }
+    if (!added || !this.session || this.snapshot.status !== 'ready') return;
+    try {
+      this.client.send(Payload.SubscribeSpotsReq, {
+        ctidTraderAccountId: this.session.ctidTraderAccountId,
+        symbolId: [...this.extraSpots],
+      });
+    } catch {
+      // Next snapshot resubscribes.
+    }
+  }
   private lastSnapshotAt = 0;
   private lastDealsAt = 0;
+
+  /**
+   * The socket auto-reconnects on drops, but the server forgets auth +
+   * spot subscriptions. Re-auth and resubscribe whenever it re-opens.
+   */
+  private watchConnection(): void {
+    this.client.onStateChange = (state) => {
+      if (state !== 'open') return;
+      if (!this.session || this.snapshot.status !== 'ready' || this.reauthing) return;
+      this.reauthing = true;
+      void (async () => {
+        try {
+          let active = this.session!;
+          if (active.expiresAt < Date.now() + 60000) {
+            const tokens = await refreshTokens(active.refreshToken);
+            active = {
+              ...active,
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              expiresAt: Date.now() + tokens.expiresIn * 1000,
+            };
+            await saveSession(active);
+            this.session = active;
+          }
+          await this.request(Payload.ApplicationAuthReq, {
+            clientId: CTRADER_CLIENT_ID,
+            clientSecret: CTRADER_CLIENT_SECRET,
+          });
+          await this.request(Payload.AccountAuthReq, {
+            ctidTraderAccountId: active.ctidTraderAccountId,
+            accessToken: active.accessToken,
+          });
+          this.attachEvents(active.ctidTraderAccountId);
+          await this.snapshotAll(active.ctidTraderAccountId, true);
+        } catch {
+          // Reconnect loop keeps the socket alive; next open retries.
+        } finally {
+          this.reauthing = false;
+        }
+      })();
+    };
+  }
 
   private async snapshotAll(accountId: number, force = false): Promise<void> {
     // Debounce event-driven refreshes: bursts of fills must not storm the server.
@@ -279,8 +358,9 @@ class LiveEngine {
       isRestingOrderStatus(o.orderStatus),
     );
 
-    // Subscribe spots for open symbols (+ conversion helpers).
+    // Subscribe spots for open symbols (+ conversion helpers + bot grid symbol).
     const wanted = new Set<number>(positions.map((p) => p.tradeData.symbolId));
+    this.extraSpots.forEach((id) => wanted.add(id));
     const byName = new Map<string, number>();
     symbols.forEach((s, id) => byName.set(s.symbolName, id));
     ['USDJPY', 'EURUSD'].forEach((name) => {
