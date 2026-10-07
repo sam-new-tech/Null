@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
 import { PositionsCard } from '@/components/home/positions-card';
+import { ChartBackdrop } from '@/components/home/chart-backdrop';
+import { GlassSheen } from '@/components/glass-sheen';
 import { LiveBadge, ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney, formatPrice } from '@/hooks/use-mock-account';
@@ -97,13 +99,15 @@ export default function TradesScreen() {
   };
 
   return (
-    <ScrollView
-      style={{ flex: 1, minHeight: 0 }}
-      contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
-      <View className="gap-4 p-4">
-        <ScreenHeader title="Trades" />
-        <LiveBadge live={live} />
+    <View className="flex-1 bg-background">
+      <ChartBackdrop />
+      <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
+        <View className="gap-4 p-4">
+          <ScreenHeader title="Trades" />
+          <LiveBadge live={live} />
         <View className="flex-row gap-2">
           {(['positions', 'orders'] as Tab[]).map((t) => {
             const active = tab === t;
@@ -130,14 +134,17 @@ export default function TradesScreen() {
           <>
             <PositionsCard positions={positions} allowClose={live} />
             {positions.length > 0 && (
-              <View className="flex-row items-center justify-between px-1">
-                <Text size="sm" muted className="uppercase tracking-widest">
-                  Total floating
-                </Text>
-                <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
-                  {formatMoney(total)}
-                </Text>
-              </View>
+              <Card>
+                <GlassSheen />
+                <Card.Content className="flex-row items-center justify-between px-5 py-3">
+                  <Text size="sm" muted className="uppercase tracking-widest">
+                    Total floating
+                  </Text>
+                  <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+                    {formatMoney(total)}
+                  </Text>
+                </Card.Content>
+              </Card>
             )}
             {(positions.length > 0 || orders.length > 0) && live && (
               <Button
@@ -157,6 +164,7 @@ export default function TradesScreen() {
           </>
         ) : orders.length === 0 ? (
           <Card className="rounded-full">
+            <GlassSheen radius={999} />
             <Card.Content className="items-center py-4">
               <Text muted>No open orders</Text>
             </Card.Content>
@@ -165,6 +173,7 @@ export default function TradesScreen() {
           <View className="gap-2">
             {orders.map((o) => (
               <Card key={o.id}>
+                <GlassSheen />
                 <Card.Content className="px-5 py-2">
                   <OrderRow order={o} last />
                 </Card.Content>
@@ -174,5 +183,6 @@ export default function TradesScreen() {
         )}
       </View>
     </ScrollView>
+    </View>
   );
 }

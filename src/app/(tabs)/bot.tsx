@@ -16,6 +16,7 @@ import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
+import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
 import { Input } from 'panelui-native/components/input';
 import { Item } from 'panelui-native/components/item';
@@ -93,6 +94,7 @@ export default function BotScreen() {
   if (!running) {
     return (
       <View className="flex-1 bg-background">
+        <ChartBackdrop />
         <View className="gap-4 p-4">
           <ScreenHeader
             action={
@@ -156,8 +158,10 @@ export default function BotScreen() {
 
   // Running: orb + live status + event logs + stop.
   return (
-    <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
-      <View className="gap-3 p-4">
+    <View className="flex-1 bg-background">
+      <ChartBackdrop />
+      <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
+        <View className="gap-3 p-4">
         <ScreenHeader
           action={
             <View className="flex-row items-center gap-2">
@@ -201,6 +205,7 @@ export default function BotScreen() {
         <View className="gap-2">
           {status.logs.slice(0, 3).map((entry, i) => (
             <Card key={`${entry.time}-${i}`}>
+              <GlassSheen />
               <Card.Content className="gap-2 p-4">
                 <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center gap-2">
@@ -228,5 +233,6 @@ export default function BotScreen() {
         </View>
       </View>
     </ScrollView>
+    </View>
   );
 }

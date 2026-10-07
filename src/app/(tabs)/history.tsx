@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 
 import { LiveBadge, ScreenHeader } from '@/components/screen-header';
+import { ChartBackdrop } from '@/components/home/chart-backdrop';
+import { GlassSheen } from '@/components/glass-sheen';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { formatMoney } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
@@ -34,25 +36,29 @@ export default function HistoryScreen() {
   const up = total >= 0;
 
   return (
-    <ScrollView
-      style={{ flex: 1, minHeight: 0 }}
-      contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
-      <View className="gap-4 p-4">
-        <ScreenHeader title="History" />
-        <LiveBadge live={live} />
-        {history.length === 0 ? (
-          <Card className="rounded-full">
-            <Card.Content className="items-center py-4">
-              <Text muted>No closed trades yet</Text>
-            </Card.Content>
-          </Card>
-        ) : (
+    <View className="flex-1 bg-background">
+      <ChartBackdrop />
+      <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
+        <View className="gap-4 p-4">
+          <ScreenHeader title="History" />
+          <LiveBadge live={live} />
+          {history.length === 0 ? (
+            <Card className="rounded-full">
+              <GlassSheen radius={999} />
+              <Card.Content className="items-center py-4">
+                <Text muted>No closed trades yet</Text>
+              </Card.Content>
+            </Card>
+          ) : (
           <View className="gap-2">
             {visible.map((t) => {
               const win = t.pl >= 0;
               return (
                 <Card key={t.id}>
+                  <GlassSheen />
                   <Card.Content className="gap-1 px-5 py-3">
                     <View className="flex-row items-center justify-between">
                       <View className="flex-row items-center gap-2">
@@ -83,14 +89,17 @@ export default function HistoryScreen() {
           </View>
         )}
         {history.length > 0 && (
-          <View className="flex-row items-center justify-between px-1">
-            <Text size="sm" muted className="uppercase tracking-widest">
-              Total closed
-            </Text>
-            <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
-              {formatMoney(total)}
-            </Text>
-          </View>
+          <Card>
+            <GlassSheen />
+            <Card.Content className="flex-row items-center justify-between px-5 py-3">
+              <Text size="sm" muted className="uppercase tracking-widest">
+                Total closed
+              </Text>
+              <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+                {formatMoney(total)}
+              </Text>
+            </Card.Content>
+          </Card>
         )}
         {totalPages > 1 && (
           <View className="flex-row items-center justify-between">
@@ -115,5 +124,6 @@ export default function HistoryScreen() {
         )}
       </View>
     </ScrollView>
+    </View>
   );
 }

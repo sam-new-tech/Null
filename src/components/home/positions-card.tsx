@@ -7,6 +7,7 @@ import { liveEngine } from '@/lib/ctrader/live';
 import { closePosition } from '@/lib/ctrader/orders';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
+import { GlassSheen } from '@/components/glass-sheen';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
 
@@ -108,6 +109,7 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
   if (positions.length === 0) {
     return (
       <Card className="rounded-full">
+        <GlassSheen radius={999} />
         <Card.Content className="items-center py-4">
           <Text muted>No active positions</Text>
         </Card.Content>
@@ -119,6 +121,7 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
     <View className="gap-2">
       {positions.map((p) => (
         <Card key={p.id}>
+          <GlassSheen />
           <Card.Content className="px-5 py-2">
             <PositionRow
               position={p}
