@@ -64,6 +64,7 @@ class LiveEngine {
   private listeners = new Set<() => void>();
   private spots = new Map<number, { bid: number; ask: number }>();
   private lightTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private session: CTraderSession | null = null;
   private starting = false;
 
@@ -178,6 +179,7 @@ class LiveEngine {
       this.watchConnection();
       this.emit({ status: 'ready', account: match ?? null });
       this.startLightRefresh();
+      this.startWatchdog();
     } catch (err) {
       this.emit({
         status: 'error',
@@ -190,6 +192,7 @@ class LiveEngine {
 
   stop(): void {
     this.stopLightRefresh();
+    this.stopWatchdog();
     this.client.onStateChange = null;
     this.client.close();
     this.session = null;
@@ -482,6 +485,30 @@ class LiveEngine {
   private stopLightRefresh(): void {
     if (this.lightTimer) clearInterval(this.lightTimer);
     this.lightTimer = null;
+  }
+
+  /**
+   * Dead-stream watchdog: heartbeats go out every 10s but prove nothing.
+   * When we hold subscriptions (positions, orders, or the bot's symbol) and
+   * hear nothing for 35s, recycle the socket — the watcher re-auths after.
+   */
+  private startWatchdog(): void {
+    this.stopWatchdog();
+    this.watchdogTimer = setInterval(() => {
+      if (this.snapshot.status !== 'ready' || !this.session) return;
+      const needsStream =
+        this.extraSpots.size > 0 || this.snapshot.positions.length > 0 || this.snapshot.orders.length > 0;
+      if (!needsStream) return;
+      if (Date.now() - this.client.lastMessageAt > 35000) {
+        console.warn('[live] stream silent — recycling connection');
+        this.client.close();
+      }
+    }, 15000);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
   }
 
   /* ---------------- selectors (app shapes) ---------------- */

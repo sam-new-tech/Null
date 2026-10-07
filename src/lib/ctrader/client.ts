@@ -27,6 +27,8 @@ export class CTraderClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
   state: ConnectionState = 'closed';
+  /** Timestamp of the last inbound frame (any type). */
+  lastMessageAt = 0;
 
   onStateChange: ((state: ConnectionState) => void) | null = null;
 
@@ -50,6 +52,7 @@ export class CTraderClient {
 
     ws.onopen = () => {
       this.setState('open');
+      this.lastMessageAt = Date.now();
       this.backoffMs = 1000;
       this.startHeartbeat();
     };
@@ -157,6 +160,7 @@ export class CTraderClient {
   }
 
   private dispatch(msg: WireMessage): void {
+    this.lastMessageAt = Date.now();
     if (msg.clientMsgId && this.pending.has(msg.clientMsgId)) {
       const { resolve, reject, timer } = this.pending.get(msg.clientMsgId)!;
       this.pending.delete(msg.clientMsgId);
