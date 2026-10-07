@@ -157,7 +157,7 @@ export default function BotScreen() {
             />
             {riskValid && (
               <Text size="sm" muted>
-                {`≈ $${stakePreview.toFixed(2)} margin per level · XAUUSD M30 · DCA grid`}
+                {`≈ $${stakePreview.toFixed(2)} margin per leg · up to 7 legs/book (≈ $${(stakePreview * 7).toFixed(2)} max) · XAUUSD M30 · DCA grid`}
               </Text>
             )}
             {startError ? (
