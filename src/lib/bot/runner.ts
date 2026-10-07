@@ -718,6 +718,7 @@ class BotRunner {
   private reconciling = false;
 
   private async reconcileInner(p: PersistedState): Promise<boolean> {
+    if (p.state !== 'running' || !p.grid) return false;
     if (!liveEngine.connected) return false;
     // Back off after repeated failures (e.g. rate limiting): pause 2 minutes.
     if (Date.now() < this.coolUntil) return false;
