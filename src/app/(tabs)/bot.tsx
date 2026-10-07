@@ -51,11 +51,23 @@ function LiveDot() {
 }
 
 function LivePL() {
-  const pl = liveEngine.openPL();
+  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice);
+  const rev = useSyncExternalStore(botRunner.subscribe, botRunner.getRevision);
+  void rev;
+  const pl = price === null ? 0 : botRunner.managedPlAt(price);
   const up = pl >= 0;
   return (
     <Text size="3xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
       {formatMoney(pl)}
+    </Text>
+  );
+}
+
+function LivePrice() {
+  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice);
+  return (
+    <Text size="3xl" weight="bold" className="text-center font-mono">
+      {price !== null ? price.toFixed(2) : '—'}
     </Text>
   );
 }
@@ -200,9 +212,7 @@ export default function BotScreen() {
             <Text size="sm" muted className="uppercase tracking-widest">
               Price
             </Text>
-            <Text size="3xl" weight="bold" className="text-center font-mono">
-              {status.lastPrice !== null ? status.lastPrice.toFixed(2) : '—'}
-            </Text>
+            <LivePrice />
           </View>
         </View>
         {status.coolingDown && (

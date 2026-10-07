@@ -1,11 +1,13 @@
+import { memo } from 'react';
 import Svg, { Defs, Ellipse, Path, RadialGradient, Stop } from 'react-native-svg';
 
 /**
  * Faint trading-chart line decoration + soft green goo glow
  * behind the screen, echoing the app's green-on-black brand.
  * Base stays AMOLED #000 — glows are low-opacity accents only.
+ * Memoized: static art must not re-render on every live tick.
  */
-export function ChartBackdrop() {
+export const ChartBackdrop = memo(function ChartBackdrop() {
   return (
     <Svg
       width="100%"

@@ -138,6 +138,8 @@ async function notify(title: string, body: string): Promise<void> {
 class BotRunner {
   private persisted: PersistedState = DEFAULT_PERSISTED;
   private listeners = new Set<() => void>();
+  /** Tick listeners: fired on EVERY spot tick (price only, no status work). */
+  private tickListeners = new Set<() => void>();
   private logs: BotLogEntry[] = [];
   private revision = 0;
   private lastEmitAt: number | null = null;
@@ -160,6 +162,28 @@ class BotRunner {
       this.listeners.delete(listener);
     };
   };
+
+  /** Per-tick subscription for price/P-L widgets (bypasses the 1s status throttle). */
+  subscribeTick = (listener: () => void): (() => void) => {
+    this.tickListeners.add(listener);
+    return () => {
+      this.tickListeners.delete(listener);
+    };
+  };
+
+  getTickPrice = (): number | null => this.lastPrice;
+
+  /** Instant managed P/L at a price (no snapshot, no floats): Σ dir·Δ·lots·100oz. */
+  managedPlAt(price: number): number {
+    if (!Number.isFinite(price)) return 0;
+    let pl = 0;
+    for (const m of this.persisted.managedPositions) {
+      if (!Number.isFinite(m.entry)) continue;
+      const dir = m.side === 'buy' ? 1 : -1;
+      pl += dir * (price - m.entry) * this.persisted.volumeLots * 100;
+    }
+    return pl;
+  }
 
   private emit(): void {
     this.revision += 1;
@@ -847,6 +871,8 @@ class BotRunner {
       if (p.state !== 'running' || !p.grid || !Number.isFinite(price)) return;
       const prev = this.lastPrice;
       this.lastPrice = price;
+      // Tick-fast path: price widgets render every tick, zero status work.
+      this.tickListeners.forEach((listener) => listener());
       if (prev === null) return; // need two ticks to detect a touch — no burst on subscribe
       // Throttled UI heartbeat so the screen visibly ticks with the market.
       if (Date.now() - this.lastUiEmit > 1000) {
