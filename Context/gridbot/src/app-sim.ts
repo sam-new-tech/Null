@@ -15,8 +15,8 @@ const GOLD_COSTS = { commissionBps: 0.3, spreadBps: 0.5, slippageBps: 0.3 };
 const EQUITY = 10000;
 const LOT_OZ = 2; // 0.02 lots — matches app at ~0.83% risk on $10k
 const DISASTER = 8;
-// Shipped app params (runner.ts:start/escape). Keep in sync.
-const ATR_LEN = 10;
+// Shipped app params (runner.ts:start/escape, DCA books). Keep in sync.
+const ATR_LEN = 14;
 const GRID_MULT = 1.9;
 const LEVELS = 10;
 

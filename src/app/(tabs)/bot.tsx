@@ -145,7 +145,7 @@ export default function BotScreen() {
             />
             {riskValid && (
               <Text size="sm" muted>
-                {`≈ $${stakePreview.toFixed(2)} margin per level · XAUUSD M15 · ATR grid`}
+                {`≈ $${stakePreview.toFixed(2)} margin per level · XAUUSD M30 · DCA grid`}
               </Text>
             )}
             {startError ? (

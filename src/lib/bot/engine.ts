@@ -171,6 +171,43 @@ export function planTick(args: {
   return intents;
 }
 
+// --- DCA books (verified sim: first entries on the grid, adds every adverse
+// step up to maxAdds, basket exit at average ± basketSteps*step). ---
+
+/** Average entry of a book's legs. NaN when empty. */
+export function dcaAvg(legs: { entry: number }[]): number {
+  if (!Array.isArray(legs) || legs.length === 0) return NaN;
+  let sum = 0;
+  let qty = 0;
+  for (const l of legs) {
+    if (!Number.isFinite(l.entry)) return NaN;
+    sum += l.entry;
+    qty += 1;
+  }
+  return qty > 0 ? sum / qty : NaN;
+}
+
+/** Basket target: average ± basketSteps * step. */
+export function dcaTarget(avg: number, side: 'buy' | 'sell', step: number, basketSteps: number): number {
+  if (!Number.isFinite(avg) || !Number.isFinite(step) || step <= 0 || !Number.isFinite(basketSteps)) return NaN;
+  return side === 'buy' ? avg + basketSteps * step : avg - basketSteps * step;
+}
+
+/** Next DCA add price: average ∓ one step. */
+export function dcaNextAdd(avg: number, side: 'buy' | 'sell', step: number): number {
+  if (!Number.isFinite(avg) || !Number.isFinite(step) || step <= 0) return NaN;
+  return side === 'buy' ? avg - step : avg + step;
+}
+
+/** Crossed `level` between prevPrice and price (direction-aware). */
+export function crossedLevel(side: 'buy' | 'sell', level: number, prevPrice: number | null, price: number): boolean {
+  if (!Number.isFinite(level) || !Number.isFinite(price)) return false;
+  if (prevPrice === null || prevPrice === undefined || !Number.isFinite(prevPrice)) {
+    return side === 'buy' ? price <= level : price >= level;
+  }
+  return side === 'buy' ? prevPrice > level && price <= level : prevPrice < level && price >= level;
+}
+
 // lots = marginPerLevel x leverage / (price x unitsPerLot), floored to
 // 0.01, min 0.01. Returns 0 on invalid inputs. Total: never throws.
 export function lotsFor(marginPerLevel: number, price: number, leverage: number, unitsPerLot: number): number {

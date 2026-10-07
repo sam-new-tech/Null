@@ -208,6 +208,23 @@ export function placeLimitOrder(accountId: number, params: LimitOrderParams): Re
   return { type: 2106, payload };
 }
 
+/** ProtoOANewOrderReq (2106) for a MARKET order. No price, no TP/SL —
+ *  fills immediately at touch (DCA adds). Confirm via ExecutionEvent. */
+export function placeMarketOrder(
+  accountId: number,
+  params: { symbolId: number; side: 'buy' | 'sell'; volumeLots: number; label?: string; unitsPerLot?: number },
+): RequestPair {
+  const payload: Record<string, unknown> = {
+    ctidTraderAccountId: accountId,
+    symbolId: params.symbolId,
+    orderType: 1,
+    tradeSide: params.side === 'buy' ? 1 : 2,
+    volume: lotsToVolume(params.volumeLots, params.unitsPerLot),
+  };
+  if (params.label !== undefined) payload.label = params.label;
+  return { type: 2106, payload };
+}
+
 /** ProtoOACancelOrderReq (2108). Confirm via ExecutionEvent ORDER_CANCELLED
  *  matching order.orderId (see file header). */
 export function cancelOrder(accountId: number, orderId: number | string): RequestPair {

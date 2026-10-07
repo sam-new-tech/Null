@@ -12,12 +12,17 @@ import {
   isRejectedStatus,
   mapTrendbars,
   placeLimitOrder,
+  placeMarketOrder,
   TrendbarPeriod,
   unitsPerLot,
 } from '../ctrader/orders';
 import { storeGet, storeSet } from '../storage';
 import {
   buildGrid,
+  crossedLevel,
+  dcaAvg,
+  dcaNextAdd,
+  dcaTarget,
   isUpBar,
   lotsFor,
   planTick,
@@ -37,11 +42,15 @@ const LOG_KEY = 'nullgrid.logs';
  */
 export const STRATEGY_RULES = {
   symbol: 'XAUUSD',
-  atrLen: 10,
+  atrLen: 14,
   gridMult: 1.9,
   levels: 10,
   tpSteps: 1,
   disasterSteps: 8,
+  /** DCA books: adds per book, basket exit at avg ± basketSteps. */
+  maxAdds: 6,
+  basketSteps: 0.5,
+  maxBooksPerSide: 3,
   maxOrders: 20,
   maxPositions: 20,
   maxRiskPct: 3,
@@ -85,6 +94,8 @@ interface PersistedState {
   atr: number | null;
   managedOrders: { id: string; side: 'buy' | 'sell'; price: number }[];
   managedPositions: { id: number; side: 'buy' | 'sell'; entry: number }[];
+  /** DCA books: legs of one averaged position sharing an anchor level. */
+  books: { side: 'buy' | 'sell'; anchor: number; legIds: number[] }[];
   startedAt: number | null;
   startEquity: number | null;
   escapeTimes: number[];
@@ -102,6 +113,7 @@ const DEFAULT_PERSISTED: PersistedState = {
   atr: null,
   managedOrders: [],
   managedPositions: [],
+  books: [],
   startedAt: null,
   startEquity: null,
   escapeTimes: [],
@@ -227,15 +239,15 @@ class BotRunner {
     throw new Error(`Symbol ${symbol} is not known — reconnect first`);
   }
 
-  private async fetchBars(symbolId: number, count = 60): Promise<Bar[]> {
+  private async fetchBars(symbolId: number, count = 130): Promise<Bar[]> {
     const res = await liveEngine.execRequest(Payload.GetTrendbarsReq, {
       ctidTraderAccountId: this.accountId(),
       symbolId,
-      period: TrendbarPeriod.M15,
+      period: TrendbarPeriod.M30,
       count,
     });
     const bars = mapTrendbars(res.trendbar ?? res);
-    if (bars.length < 25) throw new Error('Not enough M15 history for ATR(14)');
+    if (bars.length < 25) throw new Error('Not enough M30 history for ATR(14)');
     // Drop the forming bar — anchor on the last CLOSED bar.
     const closed = bars.slice(0, -1);
     return closed.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
@@ -278,7 +290,7 @@ class BotRunner {
     const bars = await this.fetchBars(symbolId);
     const lastBar = bars[bars.length - 1];
     const grid = buildGrid(bars, STRATEGY_RULES.atrLen, STRATEGY_RULES.gridMult, STRATEGY_RULES.levels);
-    // Width guard: refuse grids narrower than one M15 bar (escape-churn trap).
+    // Width guard: refuse grids narrower than one M30 bar (escape-churn trap).
     if (lastBar.high - lastBar.low > grid.step * STRATEGY_RULES.levels) {
       throw new Error(
         `Grid too narrow for current volatility (bar $${(lastBar.high - lastBar.low).toFixed(2)} > range $${(grid.step * STRATEGY_RULES.levels).toFixed(2)}) — try again later`,
@@ -294,7 +306,6 @@ class BotRunner {
       0.01,
       Math.min(volumeLots, STRATEGY_RULES.maxLotsPerLevel, Math.floor(maxByMargin * 100) / 100),
     );
-    volumeLots = Math.max(0.01, Math.min(volumeLots, Math.floor(maxByMargin * 100) / 100));
     if (volumeLots < 0.01) throw new Error('Free margin too low for one level');
 
     this.persisted = {
@@ -309,6 +320,7 @@ class BotRunner {
       atr,
       managedOrders: [],
       managedPositions: [],
+      books: [],
       startedAt: Date.now(),
       startEquity: account.equity,
       escapeTimes: [],
@@ -317,7 +329,7 @@ class BotRunner {
     this.lastBarTime = lastBar.time;
     this.lastPrice = null;
     await this.persist();
-    this.log('info', `Grid armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/level, risk ${riskPct}%`);
+    this.log('info', `DCA armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/leg, ${STRATEGY_RULES.maxAdds} adds, basket ${STRATEGY_RULES.basketSteps} step, risk ${riskPct}%`);
 
     liveEngine.execSend(Payload.SubscribeSpotsReq, {
       ctidTraderAccountId: this.accountId(),
@@ -463,7 +475,7 @@ class BotRunner {
     this.spotUnsub = null;
     this.execUnsub = null;
     this.orderErrUnsub = null;
-    this.persisted = { ...p, state: 'stopped', managedOrders: [], managedPositions: [] };
+    this.persisted = { ...p, state: 'stopped', managedOrders: [], managedPositions: [], books: [] };
     this.stopReconcileLoop();
     await this.persist();
     this.emit();
@@ -499,7 +511,7 @@ class BotRunner {
     return Math.round(n * f) / f;
   }
 
-  private async place(side: 'buy' | 'sell', level: number, tp: number, sl: number): Promise<void> {
+  private async place(side: 'buy' | 'sell', level: number, _tp: number, sl: number): Promise<void> {
     const p = this.persisted;
     if (p.state !== 'running' || !p.grid) return;
     // Rule: nothing outside the strategy book.
@@ -515,12 +527,12 @@ class BotRunner {
       this.log('error', 'Lot size outside strategy limits — placement blocked');
       return;
     }
+    // DCA: first entries carry the disaster SL only — exits are basket-driven.
     const step = p.grid.step;
-    const expectTp = side === 'buy' ? level + STRATEGY_RULES.tpSteps * step : level - STRATEGY_RULES.tpSteps * step;
     const expectSl =
       side === 'buy' ? level - STRATEGY_RULES.disasterSteps * step : level + STRATEGY_RULES.disasterSteps * step;
-    if (Math.abs(tp - expectTp) > step * 0.01 || Math.abs(sl - expectSl) > step * 0.01) {
-      this.log('error', 'Order shape outside strategy (TP/SL mismatch) — placement blocked');
+    if (Math.abs(sl - expectSl) > step * 0.01) {
+      this.log('error', 'Order shape outside strategy (SL mismatch) — placement blocked');
       return;
     }
     const lv = this.round(level);
@@ -529,13 +541,97 @@ class BotRunner {
       side,
       volumeLots: p.volumeLots,
       limitPrice: lv,
-      takeProfit: this.round(tp),
       stopLoss: this.round(sl),
       label: this.labelFor(side, lv),
       unitsPerLot: unitsPerLot(p.symbol),
     });
     liveEngine.execSend(pair.type, pair.payload);
-    this.log('info', `Limit ${side.toUpperCase()} ${p.volumeLots.toFixed(2)} @ ${level.toFixed(2)} TP ${tp.toFixed(2)}`);
+    this.log('info', `Limit ${side.toUpperCase()} ${p.volumeLots.toFixed(2)} @ ${level.toFixed(2)} SL ${sl.toFixed(2)}`);
+  }
+
+  /** DCA add: market order at the touch (sim fills adds on cross). Capped. */
+  private async placeAdd(side: 'buy' | 'sell', anchor: number): Promise<void> {
+    const p = this.persisted;
+    if (p.state !== 'running') return;
+    if (p.managedOrders.length >= STRATEGY_RULES.maxOrders) return;
+    if (p.managedPositions.length >= STRATEGY_RULES.maxPositions) {
+      this.log('error', `Position cap ${STRATEGY_RULES.maxPositions} hit — add blocked`);
+      return;
+    }
+    const book = p.books.find((b) => b.side === side && Math.abs(b.anchor - anchor) < (p.grid?.step ?? 0) * 0.49);
+    if (!book || book.legIds.length - 1 >= STRATEGY_RULES.maxAdds) return;
+    const pair = placeMarketOrder(this.accountId(), {
+      symbolId: p.symbolId,
+      side,
+      volumeLots: p.volumeLots,
+      label: this.labelForAdd(side, anchor),
+      unitsPerLot: unitsPerLot(p.symbol),
+    });
+    liveEngine.execSend(pair.type, pair.payload);
+    this.log('info', `DCA add ${side.toUpperCase()} leg ${book.legIds.length + 1} @ anchor ${anchor.toFixed(2)}`);
+  }
+
+  private labelForAdd(side: 'buy' | 'sell', anchor: number): string {
+    return `${BOT_LABEL_PREFIX}-add-${side}-${Math.round(anchor * 100)}`;
+  }
+
+  /** Parse our labels → { kind, side, anchor }. Null when foreign. */
+  private parseLabel(label: string): { kind: 'open' | 'add'; side: 'buy' | 'sell'; anchor: number } | null {
+    const parts = label.split('-');
+    // null-grid-{buy|sell}-{anchor} | null-grid-add-{buy|sell}-{anchor}
+    if (parts.length < 4 || parts[0] !== 'null' || parts[1] !== 'grid') return null;
+    if (parts[2] === 'add' && parts.length >= 5 && (parts[3] === 'buy' || parts[3] === 'sell')) {
+      const anchor = Number(parts[4]) / 100;
+      if (!Number.isFinite(anchor)) return null;
+      return { kind: 'add', side: parts[3], anchor };
+    }
+    if ((parts[2] === 'buy' || parts[2] === 'sell') && parts.length >= 4) {
+      const anchor = Number(parts[3]) / 100;
+      if (!Number.isFinite(anchor)) return null;
+      return { kind: 'open', side: parts[2], anchor };
+    }
+    return null;
+  }
+
+  /** Drop legs that no longer exist; drop books left with none. */
+  private pruneBooks(): void {
+    const alive = new Set(this.persisted.managedPositions.map((m) => m.id));
+    for (const book of this.persisted.books) {
+      book.legIds = book.legIds.filter((id) => alive.has(id));
+    }
+    this.persisted.books = this.persisted.books.filter((b) => b.legIds.length > 0);
+  }
+
+  /** Close every leg of one book at market (basket win or disaster). */
+  private async closeBook(side: 'buy' | 'sell', anchor: number, reason: 'basket' | 'disaster'): Promise<void> {
+    const p = this.persisted;
+    const tol = (p.grid?.step ?? 0) * 0.49;
+    const book = p.books.find((b) => b.side === side && Math.abs(b.anchor - anchor) < tol);
+    if (!book || book.legIds.length === 0) {
+      this.pruneBooks();
+      await this.persist();
+      return;
+    }
+    try {
+      const accountId = this.accountId();
+      const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
+      const vols = new Map<number, number>();
+      ((res.position ?? []) as { positionId: number; tradeData: { volume: number } }[]).forEach((pos) =>
+        vols.set(Number(pos.positionId), pos.tradeData.volume),
+      );
+      for (const id of [...book.legIds]) {
+        const raw = vols.get(id);
+        if (raw === undefined) continue;
+        const pair = closePosition(accountId, id, 0, 100000, raw);
+        liveEngine.execSend(pair.type, pair.payload);
+      }
+      this.log(
+        reason === 'basket' ? 'close' : 'escape',
+        `${reason === 'basket' ? 'Basket' : 'Disaster'} ${side.toUpperCase()} x${book.legIds.length} @ ${anchor.toFixed(2)} — closing`,
+      );
+    } catch (err) {
+      this.log('error', `Book close failed: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
+    }
   }
 
   private async cancelManagedOrders(): Promise<void> {
@@ -588,7 +684,7 @@ class BotRunner {
     await this.cancelManagedOrders();
     const bars = await this.fetchBars(p.symbolId);
     const lastBar = bars[bars.length - 1];
-    // Widen until the grid covers one M15 bar (max mult 3.0), else keep old grid.
+    // Widen until the grid covers one M30 bar (max mult 3.0), else keep old grid.
     let grid = buildGrid(bars, STRATEGY_RULES.atrLen, STRATEGY_RULES.gridMult, STRATEGY_RULES.levels);
     for (const mult of [2.2, 2.6, 3.0]) {
       if (lastBar.high - lastBar.low <= grid.step * STRATEGY_RULES.levels) break;
@@ -604,6 +700,7 @@ class BotRunner {
       atr: grid.step / STRATEGY_RULES.gridMult,
       managedOrders: [],
       managedPositions: [],
+      books: [],
     };
     this.barDir = isUpBar(lastBar) ? 'up' : 'down';
     this.lastBarTime = lastBar.time;
@@ -675,6 +772,7 @@ class BotRunner {
     const kept = p.managedPositions.filter((m) => openIds.has(m.id));
     if (kept.length !== p.managedPositions.length) {
       p.managedPositions = kept;
+      this.pruneBooks();
       await this.persist();
     }
 
@@ -773,8 +871,36 @@ class BotRunner {
         await this.place(intent.side, intent.level, intent.tp, intent.sl);
       }
     }
+    await this.runDca(price, prev);
     } catch (err) {
       this.log('error', err instanceof Error ? err.message : 'Tick failed');
+    }
+  }
+
+  /** DCA pass per spot tick: basket exits, disaster stops, adds. */
+  private async runDca(price: number, prevPrice: number | null): Promise<void> {
+    const p = this.persisted;
+    if (p.state !== 'running' || !p.grid) return;
+    const step = p.grid.step;
+    for (const book of [...p.books]) {
+      const legs = p.managedPositions.filter((m) => book.legIds.includes(m.id) && Number.isFinite(m.entry));
+      if (legs.length === 0) continue;
+      const avg = legs.reduce((s, m) => s + m.entry, 0) / legs.length;
+      const target = dcaTarget(avg, book.side, step, STRATEGY_RULES.basketSteps);
+      const stop =
+        book.side === 'buy'
+          ? book.anchor - STRATEGY_RULES.disasterSteps * step
+          : book.anchor + STRATEGY_RULES.disasterSteps * step;
+      if (book.side === 'buy' ? price >= target : price <= target) {
+        await this.closeBook(book.side, book.anchor, 'basket');
+      } else if (book.side === 'buy' ? price <= stop : price >= stop) {
+        await this.closeBook(book.side, book.anchor, 'disaster');
+      } else if (legs.length - 1 < STRATEGY_RULES.maxAdds) {
+        const next = dcaNextAdd(avg, book.side, step);
+        if (crossedLevel(book.side, next, prevPrice, price)) {
+          await this.placeAdd(book.side, book.anchor);
+        }
+      }
     }
   }
 
@@ -814,7 +940,22 @@ class BotRunner {
           side,
           entry: deal?.executionPrice ?? 0,
         });
+        // File the leg into its DCA book (anchor from our label).
+        const parsed = typeof label === 'string' ? this.parseLabel(label) : null;
+        const anchor = parsed?.anchor ?? deal?.executionPrice ?? 0;
+        const tol = (this.persisted.grid?.step ?? 0) * 0.49;
+        let book = this.persisted.books.find((b) => b.side === side && Math.abs(b.anchor - anchor) < tol);
+        if (!book) {
+          if (this.persisted.books.filter((b) => b.side === side).length >= STRATEGY_RULES.maxBooksPerSide) {
+            this.log('error', 'Book cap hit — leg untracked, close it manually if needed');
+          } else {
+            book = { side, anchor, legIds: [] };
+            this.persisted.books.push(book);
+          }
+        }
+        book?.legIds.push(Number(pid));
       }
+      this.pruneBooks();
       void this.persist();
       this.emit();
     }
@@ -822,6 +963,7 @@ class BotRunner {
       const id = Number(deal.positionId);
       if (this.persisted.managedPositions.some((m) => m.id === id)) {
         this.persisted.managedPositions = this.persisted.managedPositions.filter((m) => m.id !== id);
+        this.pruneBooks();
         const net = Number(deal.closePositionDetail.grossProfit ?? 0) / 100;
         this.log('close', `Position ${id} closed ${net >= 0 ? '+' : ''}$${net.toFixed(2)}`);
         void this.persist();
@@ -832,7 +974,7 @@ class BotRunner {
     void this.reconcile();
   }
 
-  /** Refresh bar direction from the latest closed M15 bar. */
+  /** Refresh bar direction from the latest closed M30 bar. */
   async refreshBar(): Promise<void> {
     const p = this.persisted;
     if (p.state !== 'running') return;
