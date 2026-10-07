@@ -17,6 +17,9 @@ import type {
   TraderInfo,
 } from './protocol';
 import { loadSession, saveSession, type CTraderSession } from './session';
+import { storeGet, storeSet } from '../storage';
+
+const SYMBOLS_CACHE_KEY = 'ctrader.symbols.v1';
 
 export interface LiveSnapshot {
   status: 'idle' | 'connecting' | 'ready' | 'error';
@@ -191,6 +194,7 @@ class LiveEngine {
     this.client.close();
     this.session = null;
     this.spots.clear();
+    this.symbolsWarned = false;
     this.snapshot = EMPTY;
     this.listeners.forEach((listener) => listener());
   }
@@ -244,6 +248,36 @@ class LiveEngine {
   /** Extra spot subscriptions (e.g. the bot's grid symbol) kept across snapshots. */
   private extraSpots = new Set<number>();
   private reauthing = false;
+  private symbolsWarned = false;
+
+  /** Last-known symbol directory (id → info) so an empty SymbolsList never blinds us. */
+  private async loadSymbolsCache(into: Map<number, SymbolInfo>): Promise<void> {
+    try {
+      const raw = await storeGet(SYMBOLS_CACHE_KEY);
+      if (!raw) return;
+      const list = JSON.parse(raw) as { symbolId: number; symbolName: string; digits: number }[];
+      list.forEach((s) => {
+        if (s.symbolId !== undefined && s.symbolName) {
+          into.set(s.symbolId, { symbolId: s.symbolId, symbolName: s.symbolName, digits: s.digits ?? 2 });
+        }
+      });
+    } catch {
+      // Cache is best-effort.
+    }
+  }
+
+  private saveSymbolsCache(symbols: Map<number, SymbolInfo>): void {
+    try {
+      void storeSet(
+        SYMBOLS_CACHE_KEY,
+        JSON.stringify(
+          [...symbols.values()].map((s) => ({ symbolId: s.symbolId, symbolName: s.symbolName, digits: s.digits })),
+        ),
+      );
+    } catch {
+      // Best effort.
+    }
+  }
 
   ensureSpots(symbolIds: number[]): void {
     let added = false;
@@ -333,6 +367,7 @@ class LiveEngine {
     ]);
 
     const symbols = needSymbols || force ? new Map<number, SymbolInfo>() : this.snapshot.symbols;
+    if (symbols.size === 0) await this.loadSymbolsCache(symbols);
     const resRecord = (symbolsRes ?? {}) as Record<string, unknown>;
     const rawList =
       (Array.isArray(resRecord.symbol) && resRecord.symbol.length > 0 ? resRecord.symbol : null) ??
@@ -343,13 +378,11 @@ class LiveEngine {
     const rawSymbols = rawList as {
       symbolId: number;
       symbolName?: string;
+      digits?: number;
     }[];
     rawSymbols.forEach((s) => {
-      if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: 2 });
+      if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: typeof s.digits === 'number' ? s.digits : 2 });
     });
-    if (symbols.size === 0) {
-      console.warn('[live] symbols empty, res keys:', Object.keys(resRecord));
-    }
 
     const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter((p) =>
       isOpenPositionStatus(p.positionStatus),
@@ -357,6 +390,45 @@ class LiveEngine {
     const orders = ((reconcileRes.order ?? []) as OrderInfo[]).filter((o) =>
       isRestingOrderStatus(o.orderStatus),
     );
+
+    // Fallback: SymbolsList answers empty on some accounts — resolve the ids
+    // we actually hold via SymbolById (known-good request).
+    const missing = new Set<number>();
+    positions.forEach((p) => {
+      if (!symbols.has(p.tradeData.symbolId)) missing.add(p.tradeData.symbolId);
+    });
+    orders.forEach((o) => {
+      if (!symbols.has(o.tradeData.symbolId)) missing.add(o.tradeData.symbolId);
+    });
+    if (missing.size > 0) {
+      try {
+        const byId = await this.request(Payload.SymbolByIdReq, {
+          ctidTraderAccountId: accountId,
+          symbolId: [...missing],
+        });
+        const list = ((byId.symbol ?? []) as { symbolId: number; symbolName?: string; digits?: number }[]);
+        list.forEach((s) => {
+          if (s.symbolName) {
+            symbols.set(s.symbolId, {
+              symbolId: s.symbolId,
+              symbolName: normalizeSymbolName(s.symbolName),
+              digits: typeof s.digits === 'number' ? s.digits : 2,
+            });
+          }
+        });
+      } catch {
+        // Best effort — cache below still applies.
+      }
+    }
+    if (symbols.size === 0) {
+      if (!this.symbolsWarned) {
+        this.symbolsWarned = true;
+        console.warn('[live] symbols empty, res keys:', Object.keys(resRecord));
+      }
+    } else {
+      this.symbolsWarned = false;
+      this.saveSymbolsCache(symbols);
+    }
 
     // Subscribe spots for open symbols (+ conversion helpers + bot grid symbol).
     const wanted = new Set<number>(positions.map((p) => p.tradeData.symbolId));
