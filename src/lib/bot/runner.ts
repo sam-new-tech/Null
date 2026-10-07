@@ -50,6 +50,8 @@ export const STRATEGY_RULES = {
   /** DCA books: adds per book, basket exit at avg ± basketSteps. */
   maxAdds: 6,
   basketSteps: 0.5,
+  /** Per-leg server TP at entry ± legTpSteps (adds tracked tick-side). */
+  legTpSteps: 1,
   maxBooksPerSide: 3,
   maxOrders: 20,
   maxPositions: 20,
@@ -94,7 +96,7 @@ interface PersistedState {
   grid: GridSetup | null;
   atr: number | null;
   managedOrders: { id: string; side: 'buy' | 'sell'; price: number }[];
-  managedPositions: { id: number; side: 'buy' | 'sell'; entry: number }[];
+  managedPositions: { id: number; side: 'buy' | 'sell'; entry: number; tp: number }[];
   /** DCA books: legs of one averaged position sharing an anchor level. */
   books: { side: 'buy' | 'sell'; anchor: number; legIds: number[] }[];
   startedAt: number | null;
@@ -348,7 +350,7 @@ class BotRunner {
     this.lastBarTime = lastBar.time;
     this.lastPrice = null;
     await this.persist();
-    this.log('info', `DCA armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/leg (equity $${account.equity.toFixed(2)}), ${STRATEGY_RULES.maxAdds} adds, basket ${STRATEGY_RULES.basketSteps} step`);
+    this.log('info', `DCA armed: step ${grid.step.toFixed(2)}, ${volumeLots.toFixed(2)} lots/leg (equity $${account.equity.toFixed(2)}), ${STRATEGY_RULES.maxAdds} adds, leg TP ${STRATEGY_RULES.legTpSteps} step, basket ${STRATEGY_RULES.basketSteps} step`);
 
     liveEngine.execSend(Payload.SubscribeSpotsReq, {
       ctidTraderAccountId: this.accountId(),
@@ -530,7 +532,7 @@ class BotRunner {
     return Math.round(n * f) / f;
   }
 
-  private async place(side: 'buy' | 'sell', level: number, _tp: number, sl: number): Promise<void> {
+  private async place(side: 'buy' | 'sell', level: number, tp: number, sl: number): Promise<void> {
     const p = this.persisted;
     if (p.state !== 'running' || !p.grid) return;
     // Rule: nothing outside the strategy book.
@@ -546,12 +548,13 @@ class BotRunner {
       this.log('error', 'Lot size outside strategy limits — placement blocked');
       return;
     }
-    // DCA: first entries carry the disaster SL only — exits are basket-driven.
+    // DCA first entries: server TP at entry ± legTpSteps, disaster SL.
     const step = p.grid.step;
+    const expectTp = side === 'buy' ? level + STRATEGY_RULES.legTpSteps * step : level - STRATEGY_RULES.legTpSteps * step;
     const expectSl =
       side === 'buy' ? level - STRATEGY_RULES.disasterSteps * step : level + STRATEGY_RULES.disasterSteps * step;
-    if (Math.abs(sl - expectSl) > step * 0.01) {
-      this.log('error', 'Order shape outside strategy (SL mismatch) — placement blocked');
+    if (Math.abs(tp - expectTp) > step * 0.01 || Math.abs(sl - expectSl) > step * 0.01) {
+      this.log('error', 'Order shape outside strategy (TP/SL mismatch) — placement blocked');
       return;
     }
     const lv = this.round(level);
@@ -560,12 +563,13 @@ class BotRunner {
       side,
       volumeLots: p.volumeLots,
       limitPrice: lv,
+      takeProfit: this.round(tp),
       stopLoss: this.round(sl),
       label: this.labelFor(side, lv),
       unitsPerLot: unitsPerLot(p.symbol),
     });
     liveEngine.execSend(pair.type, pair.payload);
-    this.log('info', `Limit ${side.toUpperCase()} ${p.volumeLots.toFixed(2)} @ ${level.toFixed(2)} SL ${sl.toFixed(2)}`);
+    this.log('info', `Limit ${side.toUpperCase()} ${p.volumeLots.toFixed(2)} @ ${level.toFixed(2)} TP ${tp.toFixed(2)} SL ${sl.toFixed(2)}`);
   }
 
   /** DCA add: market order at the touch (sim fills adds on cross). Capped. */
@@ -898,11 +902,40 @@ class BotRunner {
     }
   }
 
-  /** DCA pass per spot tick: basket exits, disaster stops, adds. */
+  /** Close specific legs at market (add-leg TPs). */
+  private async closeLegs(ids: number[]): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      const accountId = this.accountId();
+      const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
+      const vols = new Map<number, number>();
+      ((res.position ?? []) as { positionId: number; tradeData: { volume: number } }[]).forEach((pos) =>
+        vols.set(Number(pos.positionId), pos.tradeData.volume),
+      );
+      for (const id of ids) {
+        const raw = vols.get(id);
+        if (raw === undefined) continue;
+        const pair = closePosition(accountId, id, 0, 100000, raw);
+        liveEngine.execSend(pair.type, pair.payload);
+      }
+      this.log('close', `Leg TP x${ids.length} — closing`);
+    } catch (err) {
+      this.log('error', `Leg close failed: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
+    }
+  }
+
+  /** DCA pass per spot tick: leg TPs, basket exits, disaster stops, adds. */
   private async runDca(price: number, prevPrice: number | null): Promise<void> {
     const p = this.persisted;
     if (p.state !== 'running' || !p.grid) return;
     const step = p.grid.step;
+    // Add-leg TPs first (first-entry legs TP server-side).
+    const tpHits = p.managedPositions.filter(
+      (m) => Number.isFinite(m.tp) && (m.side === 'buy' ? price >= m.tp : price <= m.tp),
+    );
+    if (tpHits.length > 0) {
+      await this.closeLegs(tpHits.map((m) => m.id));
+    }
     for (const book of [...p.books]) {
       const legs = p.managedPositions.filter((m) => book.legIds.includes(m.id) && Number.isFinite(m.entry));
       if (legs.length === 0) continue;
@@ -956,14 +989,23 @@ class BotRunner {
       const pid = position?.positionId ?? deal?.positionId;
       const side = order.tradeData?.tradeSide === 2 || order.tradeData?.tradeSide === 'SELL' ? 'sell' : 'buy';
       if (pid !== undefined && !this.persisted.managedPositions.some((m) => m.id === Number(pid))) {
-        this.persisted.managedPositions.push({
-          id: Number(pid),
-          side,
-          entry: deal?.executionPrice ?? 0,
-        });
         // File the leg into its DCA book (anchor from our label).
         const parsed = typeof label === 'string' ? this.parseLabel(label) : null;
         const anchor = parsed?.anchor ?? deal?.executionPrice ?? 0;
+        const execPrice = deal?.executionPrice ?? 0;
+        // First-entry legs carry a server TP; add-legs are TP'd tick-side.
+        const tp =
+          parsed?.kind === 'add' && Number.isFinite(execPrice) && this.persisted.grid
+            ? side === 'buy'
+              ? execPrice + STRATEGY_RULES.legTpSteps * this.persisted.grid.step
+              : execPrice - STRATEGY_RULES.legTpSteps * this.persisted.grid.step
+            : NaN;
+        this.persisted.managedPositions.push({
+          id: Number(pid),
+          side,
+          entry: execPrice,
+          tp,
+        });
         const tol = (this.persisted.grid?.step ?? 0) * 0.49;
         let book = this.persisted.books.find((b) => b.side === side && Math.abs(b.anchor - anchor) < tol);
         if (!book) {
