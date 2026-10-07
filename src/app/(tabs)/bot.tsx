@@ -19,24 +19,24 @@ import { Dialog } from 'panelui-native/components/dialog';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
 import { Input } from 'panelui-native/components/input';
-import { Item } from 'panelui-native/components/item';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 
-function Row({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'up' | 'down' }) {
+function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <Item variant="outline">
-      <Item.Content>
-        <Item.Title>{label}</Item.Title>
-      </Item.Content>
-      <Text
-        weight="semibold"
-        className={
-          tone === 'up' ? 'ml-auto text-success' : tone === 'down' ? 'ml-auto text-destructive' : 'ml-auto'
-        }>
-        {value}
-      </Text>
-    </Item>
+    <View style={{ flexBasis: '48%', flexGrow: 1 }}>
+      <Card>
+        <GlassSheen />
+        <Card.Content className="gap-1 p-4">
+          <Text size="sm" muted className="uppercase tracking-widest">
+            {label}
+          </Text>
+          <Text size="xl" weight="bold" className="font-mono">
+            {value}
+          </Text>
+        </Card.Content>
+      </Card>
+    </View>
   );
 }
 
@@ -196,9 +196,12 @@ export default function BotScreen() {
             )}
           </Card.Content>
         </Card>
-        <Row label="Open managed" value={`${status.openManaged} / 20`} />
-        <Row label="Resting limits" value={String(status.restingCount)} />
-        <Row label="Volume / level" value={`${status.volumeLots.toFixed(2)} lots`} />
+        <View className="flex-row flex-wrap gap-3">
+          <StatTile label="Open" value={`${status.openManaged}/20`} />
+          <StatTile label="Resting" value={String(status.restingCount)} />
+          <StatTile label="Lots / lvl" value={status.volumeLots.toFixed(2)} />
+          <StatTile label="Step" value={status.step !== null ? status.step.toFixed(2) : '—'} />
+        </View>
         <Button variant="destructive" fullWidth onPress={stop}>
           Stop bot
         </Button>
