@@ -191,7 +191,7 @@ export default function BotScreen() {
             <LivePL />
           </View>
           <View className="items-center gap-1">
-            <ThinkingOrb state="working" size={96} />
+            <ThinkingOrb state="working" size={128} />
             <Text size="xs" muted className="text-center font-mono">
               {status.symbol}
             </Text>
