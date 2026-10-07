@@ -297,6 +297,31 @@ class LiveEngine {
       const before = this.snapshot.positions.length;
       this.snapshot.positions = this.snapshot.positions.filter((p) => Number(p.positionId) !== Number(pid));
       if (this.snapshot.positions.length !== before) changed = true;
+      // Optimistic history row until DealListReq reconciles (≤5s later).
+      const symbolId = Number(order?.tradeData?.symbolId ?? NaN);
+      const volume = Number(order?.tradeData?.volume ?? deal?.volume ?? NaN);
+      const side = order?.tradeData?.tradeSide === 2 || order?.tradeData?.tradeSide === 'SELL' ? 2 : 1;
+      if (
+        Number.isFinite(symbolId) &&
+        Number.isFinite(volume) &&
+        !this.snapshot.deals.some((d) => Number(d.positionId) === Number(pid))
+      ) {
+        this.snapshot.deals = [
+          {
+            dealId: Date.now(),
+            positionId: Number(pid),
+            volume,
+            symbolId,
+            executionTimestamp: Date.now(),
+            executionPrice: deal?.executionPrice ?? 0,
+            tradeSide: side,
+            dealStatus: 2,
+            closePositionDetail: deal.closePositionDetail as DealInfo['closePositionDetail'],
+          },
+          ...this.snapshot.deals,
+        ].slice(0, 100);
+        changed = true;
+      }
     }
     if (changed) this.emit({});
   }
