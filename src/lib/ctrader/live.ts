@@ -7,7 +7,7 @@ import {
   socketUrl,
 } from './config';
 import { Payload } from './protocol';
-import { isOpenPositionStatus, isRestingOrderStatus } from './orders';
+import { isFilledStatus, isOpenPositionStatus, isRestingOrderStatus } from './orders';
 import type {
   AccountInfo,
   DealInfo,
@@ -217,10 +217,11 @@ class LiveEngine {
   private attachEvents(accountId: number): void {
     this.eventUnsubs.forEach((off) => off());
     this.eventUnsubs = [];
-    // Position/balance changes: refresh the snapshot (simple + robust).
+    // Position/balance changes: patch instantly, reconcile truth right after.
     // A close also stales the deals list so History updates in realtime.
     this.eventUnsubs.push(
       this.client.on(Payload.ExecutionEvent, (payload) => {
+        this.patchExecution(payload);
         const deal = payload.deal as { closePositionDetail?: object } | undefined;
         if (deal?.closePositionDetail) this.lastDealsAt = 0;
         void this.snapshotAll(accountId);
@@ -232,7 +233,7 @@ class LiveEngine {
         if (trader) this.emit({ trader });
       }),
     );
-    // Spots stream into a map; a 2s light tick re-renders P/L (no per-tick setState).
+    // Spots stream into a map; P/L re-renders at most every 500ms (no per-tick setState storm).
     this.eventUnsubs.push(
       this.client.on(Payload.SpotEvent, (payload) => {
         const symbolId = payload.symbolId as number;
@@ -243,9 +244,61 @@ class LiveEngine {
             bid: (bid ?? ask ?? 0) / 100000,
             ask: (ask ?? bid ?? 0) / 100000,
           });
+          if (Date.now() - this.lastSpotEmit > 500) {
+            this.lastSpotEmit = Date.now();
+            this.emit({});
+          }
         }
       }),
     );
+  }
+
+  /**
+   * Optimistic execution patch: fills and closes appear in the same frame
+   * as the broker event — snapshotAll (≤5s later) reconciles the truth.
+   */
+  private patchExecution(payload: Record<string, unknown>): void {
+    const order = payload.order as
+      | { orderId?: number; orderStatus?: number | string; tradeData?: { label?: string; tradeSide?: number | string; symbolId?: number; volume?: number } }
+      | undefined;
+    const deal = payload.deal as
+      | { positionId?: number; executionPrice?: number; volume?: number; closePositionDetail?: object }
+      | undefined;
+    const position = payload.position as { positionId?: number } | undefined;
+    let changed = false;
+
+    const pid = position?.positionId ?? deal?.positionId;
+    if (order && isFilledStatus(order.orderStatus) && order.orderId !== undefined) {
+      this.snapshot.orders = this.snapshot.orders.filter((o) => Number(o.orderId) !== Number(order.orderId));
+      changed = true;
+      const symbolId = Number(order.tradeData?.symbolId ?? NaN);
+      const side = order.tradeData?.tradeSide === 2 || order.tradeData?.tradeSide === 'SELL' ? 2 : 1;
+      const volume = Number(order.tradeData?.volume ?? deal?.volume ?? NaN);
+      if (
+        pid !== undefined &&
+        Number.isFinite(symbolId) &&
+        Number.isFinite(volume) &&
+        !this.snapshot.positions.some((p) => Number(p.positionId) === Number(pid))
+      ) {
+        this.snapshot.positions = [
+          ...this.snapshot.positions,
+          {
+            positionId: Number(pid),
+            tradeData: { symbolId, volume, tradeSide: side },
+            positionStatus: 'POSITION_STATUS_OPEN',
+            swap: 0,
+            price: deal?.executionPrice ?? 0,
+          } as PositionInfo,
+        ];
+        changed = true;
+      }
+    }
+    if (deal?.closePositionDetail && pid !== undefined) {
+      const before = this.snapshot.positions.length;
+      this.snapshot.positions = this.snapshot.positions.filter((p) => Number(p.positionId) !== Number(pid));
+      if (this.snapshot.positions.length !== before) changed = true;
+    }
+    if (changed) this.emit({});
   }
 
   /** Extra spot subscriptions (e.g. the bot's grid symbol) kept across snapshots. */
@@ -302,6 +355,7 @@ class LiveEngine {
   }
   private lastSnapshotAt = 0;
   private lastDealsAt = 0;
+  private lastSpotEmit = 0;
 
   /**
    * The socket auto-reconnects on drops, but the server forgets auth +
