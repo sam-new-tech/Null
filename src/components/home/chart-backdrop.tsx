@@ -50,4 +50,4 @@ export const ChartBackdrop = memo(function ChartBackdrop() {
       />
     </Svg>
   );
-}
+});
