@@ -99,6 +99,16 @@ export class CTraderClient {
 
   /** Send a request and resolve with the matching response payload. */
   request(payloadType: number, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    // The server handles one message at a time: serialize all requests so
+    // event bursts (fills + reconcile + closes) never stampede into timeouts.
+    const run = this.chain.then(() => this.doRequest(payloadType, payload));
+    this.chain = run.catch(() => {});
+    return run;
+  }
+
+  private chain: Promise<unknown> = Promise.resolve();
+
+  private doRequest(payloadType: number, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const raw = encode(payloadType, payload);
     const { clientMsgId } = JSON.parse(raw) as { clientMsgId: string };
     return new Promise((resolve, reject) => {

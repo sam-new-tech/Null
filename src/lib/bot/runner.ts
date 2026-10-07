@@ -625,38 +625,6 @@ class BotRunner {
     this.persisted.books = this.persisted.books.filter((b) => b.legIds.length > 0);
   }
 
-  /** Close every leg of one book at market (basket win or disaster). */
-  private async closeBook(side: 'buy' | 'sell', anchor: number, reason: 'basket' | 'disaster'): Promise<void> {
-    const p = this.persisted;
-    const tol = (p.grid?.step ?? 0) * 0.49;
-    const book = p.books.find((b) => b.side === side && Math.abs(b.anchor - anchor) < tol);
-    if (!book || book.legIds.length === 0) {
-      this.pruneBooks();
-      await this.persist();
-      return;
-    }
-    try {
-      const accountId = this.accountId();
-      const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
-      const vols = new Map<number, number>();
-      ((res.position ?? []) as { positionId: number; tradeData: { volume: number } }[]).forEach((pos) =>
-        vols.set(Number(pos.positionId), pos.tradeData.volume),
-      );
-      for (const id of [...book.legIds]) {
-        const raw = vols.get(id);
-        if (raw === undefined) continue;
-        const pair = closePosition(accountId, id, 0, 100000, raw);
-        liveEngine.execSend(pair.type, pair.payload);
-      }
-      this.log(
-        reason === 'basket' ? 'close' : 'escape',
-        `${reason === 'basket' ? 'Basket' : 'Disaster'} ${side.toUpperCase()} x${book.legIds.length} @ ${anchor.toFixed(2)} — closing`,
-      );
-    } catch (err) {
-      this.log('error', `Book close failed: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
-    }
-  }
-
   private async cancelManagedOrders(): Promise<void> {
     const p = this.persisted;
     for (const order of p.managedOrders) {
@@ -736,6 +704,20 @@ class BotRunner {
   async reconcile(): Promise<boolean> {
     const p = this.persisted;
     if (p.state !== 'running' || !p.grid) return false;
+    if (!liveEngine.connected) return false;
+    // Never overlap passes: event bursts must queue, not stampede.
+    if (this.reconciling) return false;
+    this.reconciling = true;
+    try {
+      return await this.reconcileInner(p);
+    } finally {
+      this.reconciling = false;
+    }
+  }
+
+  private reconciling = false;
+
+  private async reconcileInner(p: PersistedState): Promise<boolean> {
     if (!liveEngine.connected) return false;
     // Back off after repeated failures (e.g. rate limiting): pause 2 minutes.
     if (Date.now() < this.coolUntil) return false;
@@ -936,6 +918,8 @@ class BotRunner {
     if (tpHits.length > 0) {
       await this.closeLegs(tpHits.map((m) => m.id));
     }
+    // One batched book-close per tick: a single reconcile serves every book.
+    const toClose: { ids: number[]; side: 'buy' | 'sell'; anchor: number; reason: 'basket' | 'disaster' }[] = [];
     for (const book of [...p.books]) {
       const legs = p.managedPositions.filter((m) => book.legIds.includes(m.id) && Number.isFinite(m.entry));
       if (legs.length === 0) continue;
@@ -946,14 +930,38 @@ class BotRunner {
           ? book.anchor - STRATEGY_RULES.disasterSteps * step
           : book.anchor + STRATEGY_RULES.disasterSteps * step;
       if (book.side === 'buy' ? price >= target : price <= target) {
-        await this.closeBook(book.side, book.anchor, 'basket');
+        toClose.push({ ids: legs.map((m) => m.id), side: book.side, anchor: book.anchor, reason: 'basket' });
       } else if (book.side === 'buy' ? price <= stop : price >= stop) {
-        await this.closeBook(book.side, book.anchor, 'disaster');
+        toClose.push({ ids: legs.map((m) => m.id), side: book.side, anchor: book.anchor, reason: 'disaster' });
       } else if (legs.length - 1 < STRATEGY_RULES.maxAdds) {
         const next = dcaNextAdd(avg, book.side, step);
         if (crossedLevel(book.side, next, prevPrice, price)) {
           await this.placeAdd(book.side, book.anchor);
         }
+      }
+    }
+    if (toClose.length > 0) {
+      try {
+        const accountId = this.accountId();
+        const res = await liveEngine.execRequest(Payload.ReconcileReq, { ctidTraderAccountId: accountId });
+        const vols = new Map<number, number>();
+        ((res.position ?? []) as { positionId: number; tradeData: { volume: number } }[]).forEach((pos) =>
+          vols.set(Number(pos.positionId), pos.tradeData.volume),
+        );
+        for (const g of toClose) {
+          for (const id of g.ids) {
+            const raw = vols.get(id);
+            if (raw === undefined) continue;
+            const pair = closePosition(accountId, id, 0, 100000, raw);
+            liveEngine.execSend(pair.type, pair.payload);
+          }
+          this.log(
+            g.reason === 'basket' ? 'close' : 'escape',
+            `${g.reason === 'basket' ? 'Basket' : 'Disaster'} ${g.side.toUpperCase()} x${g.ids.length} @ ${g.anchor.toFixed(2)} — closing`,
+          );
+        }
+      } catch (err) {
+        this.log('error', `Book close failed: ${err instanceof Error ? err.message : 'connection failed'} — retry`);
       }
     }
   }
