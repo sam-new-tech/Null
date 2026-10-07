@@ -54,7 +54,7 @@ function LivePL() {
   const pl = liveEngine.openPL();
   const up = pl >= 0;
   return (
-    <Text size="xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+    <Text size="2xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
       {formatMoney(pl)}
     </Text>
   );
@@ -200,7 +200,7 @@ export default function BotScreen() {
             <Text size="sm" muted className="uppercase tracking-widest">
               Price
             </Text>
-            <Text size="xl" weight="bold" className="text-center font-mono">
+            <Text size="2xl" weight="bold" className="text-center font-mono">
               {status.lastPrice !== null ? status.lastPrice.toFixed(2) : '—'}
             </Text>
           </View>
