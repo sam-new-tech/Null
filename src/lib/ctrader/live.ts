@@ -297,6 +297,16 @@ class LiveEngine {
       const before = this.snapshot.positions.length;
       this.snapshot.positions = this.snapshot.positions.filter((p) => Number(p.positionId) !== Number(pid));
       if (this.snapshot.positions.length !== before) changed = true;
+      // Balance lands instantly from the close detail — equity/margin follow on the next tick.
+      const detail = deal.closePositionDetail as { balance?: number; moneyDigits?: number };
+      if (typeof detail.balance === 'number' && this.snapshot.trader) {
+        const tDigits = this.snapshot.trader.moneyDigits ?? 2;
+        const dDigits = detail.moneyDigits ?? tDigits;
+        const balance =
+          dDigits === tDigits ? detail.balance : Math.round(detail.balance * Math.pow(10, tDigits - dDigits));
+        this.snapshot.trader = { ...this.snapshot.trader, balance };
+        changed = true;
+      }
       // Optimistic history row until DealListReq reconciles (≤5s later).
       const symbolId = Number(order?.tradeData?.symbolId ?? NaN);
       const volume = Number(order?.tradeData?.volume ?? deal?.volume ?? NaN);
