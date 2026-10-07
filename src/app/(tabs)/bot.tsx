@@ -18,6 +18,7 @@ import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
+import { formatMoney } from '@/hooks/use-mock-account';
 import { Input } from 'panelui-native/components/input';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
@@ -47,6 +48,16 @@ function LiveDot() {
   }, [pulse]);
   const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
   return <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#34d399' }, style]} />;
+}
+
+function LivePL() {
+  const pl = liveEngine.openPL();
+  const up = pl >= 0;
+  return (
+    <Text size="xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+      {formatMoney(pl)}
+    </Text>
+  );
 }
 
 export default function BotScreen() {
@@ -172,30 +183,33 @@ export default function BotScreen() {
             </View>
           }
         />
-        <Card>
-          <GlassSheen />
-          <Card.Content className="items-center gap-2 p-5">
+        <View className="flex-row items-center justify-between px-2 py-1">
+          <View className="flex-1 items-start gap-1">
+            <Text size="sm" muted className="uppercase tracking-widest">
+              Live P/L
+            </Text>
+            <LivePL />
+          </View>
+          <View className="items-center gap-1">
             <ThinkingOrb state="working" size={96} />
-            <Text size="lg" weight="bold" className="text-center">
-              Grid running · {status.symbol}
+            <Text size="xs" muted className="text-center font-mono">
+              {status.symbol}
             </Text>
-            <Text size="sm" muted className="text-center font-mono">
-              {status.step !== null
-                ? `step ${status.step.toFixed(2)} · risk ${status.riskPct}% · ${status.volumeLots.toFixed(2)} lots`
-                : 'Arming…'}
+          </View>
+          <View className="flex-1 items-end gap-1">
+            <Text size="sm" muted className="uppercase tracking-widest">
+              Price
             </Text>
-            {status.lastPrice !== null && (
-              <Text size="2xl" weight="bold" className="text-center font-mono">
-                {status.lastPrice.toFixed(2)}
-              </Text>
-            )}
-            {status.coolingDown && (
-              <Text size="sm" muted className="text-center">
-                Taking a short break — back on its own soon
-              </Text>
-            )}
-          </Card.Content>
-        </Card>
+            <Text size="xl" weight="bold" className="text-center font-mono">
+              {status.lastPrice !== null ? status.lastPrice.toFixed(2) : '—'}
+            </Text>
+          </View>
+        </View>
+        {status.coolingDown && (
+          <Text size="sm" muted className="text-center">
+            Taking a short break — back on its own soon
+          </Text>
+        )}
         <View className="flex-row flex-wrap gap-3">
           <StatTile label="Open" value={`${status.openManaged}/20`} />
           <StatTile label="Resting" value={String(status.restingCount)} />
