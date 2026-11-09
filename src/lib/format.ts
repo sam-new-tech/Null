@@ -27,3 +27,12 @@ export function formatPrice(symbol: string, value: number): string {
 export function formatLots(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : '—';
 }
+
+/**
+ * Indicator value with fixed decimals, or an em dash while the indicator is
+ * still warming up (`null`) or the feed delivers a non-finite number.
+ */
+export function formatIndicator(value: number | null | undefined, digits: number): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return value.toFixed(digits);
+}

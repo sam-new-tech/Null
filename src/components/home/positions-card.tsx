@@ -8,7 +8,9 @@ import { closePosition } from '@/lib/ctrader/orders';
 import { Payload } from '@/lib/ctrader/protocol';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
+import { EmptyCard } from '@/components/empty-card';
 import { GlassSheen } from '@/components/glass-sheen';
+import { SideLabel } from '@/components/side-label';
 import { Text } from 'panelui-native/primitives/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
 
@@ -51,12 +53,7 @@ function PositionRow({
         accessibilityLabel={`${position.side} ${position.symbol} ${position.volume.toFixed(2)} lots, ${formatMoney(position.pl)}`}>
         <View className="flex-row items-center justify-between py-3">
         <View className="flex-row items-center gap-2">
-          <Text
-            size="xs"
-            weight="bold"
-            className={position.side === 'buy' ? 'text-success' : 'text-destructive'}>
-            {position.side === 'buy' ? 'BUY' : 'SELL'}
-          </Text>
+          <SideLabel side={position.side} />
           <Text weight="medium">{position.symbol}</Text>
           <Text size="sm" muted>
             {formatLots(position.volume)}
@@ -122,11 +119,11 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
     try {
       const accountId = liveEngine.getAccountId();
       if (!accountId) {
-        setCloseError('Not connected — retry');
+        done(() => setCloseError('Not connected — retry'));
         return;
       }
       if (!liveEngine.isOpen()) {
-        setCloseError('Socket down — retry in a moment');
+        done(() => setCloseError('Socket down — retry in a moment'));
         return;
       }
       const pair = closePosition(accountId, position.id, 0, 100000, position.rawVolume);
@@ -159,14 +156,7 @@ export function PositionsCard({ positions, allowClose = false }: { positions: Po
   };
 
   if (positions.length === 0) {
-    return (
-      <Card className="rounded-full">
-        <GlassSheen radius={999} />
-        <Card.Content className="items-center py-4">
-          <Text muted>No active positions</Text>
-        </Card.Content>
-      </Card>
-    );
+    return <EmptyCard message="No active positions" />;
   }
 
   return (

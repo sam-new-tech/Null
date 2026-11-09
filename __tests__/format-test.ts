@@ -1,4 +1,5 @@
 import {
+  formatIndicator,
   formatLots,
   formatMoney,
   formatPlainMoney,
@@ -49,5 +50,20 @@ describe('formatLots', () => {
 
   it('renders an em dash for bad input', () => {
     expect(formatLots(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatIndicator', () => {
+  it('renders fixed decimals', () => {
+    expect(formatIndicator(2415.3, 2)).toBe('2415.30');
+    expect(formatIndicator(27.456, 1)).toBe('27.5');
+    expect(formatIndicator(0, 1)).toBe('0.0');
+  });
+
+  it('renders an em dash while warming up or on bad data', () => {
+    expect(formatIndicator(null, 2)).toBe('—');
+    expect(formatIndicator(undefined, 2)).toBe('—');
+    expect(formatIndicator(Number.NaN, 2)).toBe('—');
+    expect(formatIndicator(Number.POSITIVE_INFINITY, 2)).toBe('—');
   });
 });

@@ -31,7 +31,8 @@ export function LiveBadge({ live }: { live: boolean }) {
 /**
  * Shared tab-screen header: title (or action) on the left,
  * logo always on the right near the corner.
- */export function ScreenHeader({ title, action }: { title?: string; action?: ReactNode }) {
+ */
+export function ScreenHeader({ title, action }: { title?: string; action?: ReactNode }) {
   return (
     <View className="flex-row items-center justify-between">
       {title ? (

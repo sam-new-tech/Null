@@ -66,7 +66,10 @@ export const STRATEGY_PARAMS = {
  * Resample 1m bars into 5m closes matching pandas `resample('5min', label='right', closed='right').last()`.
  * Computes EMA(50) on the 5m bars and forward-fills back to 1m bars.
  */
-export function resample5mEMA(bars: Bar[], period = STRATEGY_PARAMS.ema5mPeriod): (number | null)[] {
+export function resample5mEMA(
+  bars: Bar[],
+  period: number = STRATEGY_PARAMS.ema5mPeriod,
+): (number | null)[] {
   const n = bars.length;
   if (n === 0) return [];
 
@@ -116,7 +119,10 @@ export function resample5mEMA(bars: Bar[], period = STRATEGY_PARAMS.ema5mPeriod)
  * delta = rolling_sum(bull_vol, 20) - rolling_sum(bear_vol, 20)
  * vdc = delta / rolling_sum(volume, 20) * 100
  */
-export function calculateVDC(bars: Bar[], period = STRATEGY_PARAMS.vdcPeriod): (number | null)[] {
+export function calculateVDC(
+  bars: Bar[],
+  period: number = STRATEGY_PARAMS.vdcPeriod,
+): (number | null)[] {
   const n = bars.length;
   const out = new Array<number | null>(n).fill(null);
   if (n < period) return out;
