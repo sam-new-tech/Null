@@ -95,28 +95,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const completeWithCode = useCallback(async (code: string) => {
-    setStage('Exchanging code…');
-    const tokens = await exchangeCode(code, redirectUri());
-    const session = {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresAt: Date.now() + tokens.expiresIn * 1000,
-      ctidTraderAccountId: 0,
-      isLive: false,
-    };
-    setStage('Connecting to cTrader…');
-    await liveEngine.start(session);
+  /** Verify the engine actually authed and persisted before leaving login. */
+  const adoptSession = useCallback(async () => {
     const stored = await loadSession();
     if (!stored) throw new Error('Session was not stored');
     if (!liveEngine.connected) {
-      const err = liveEngine.getSnapshot().error ?? 'Connection failed';
-      throw new Error(err);
+      throw new Error(liveEngine.getSnapshot().error ?? 'Connection failed');
     }
     setConnected(true);
     setLive(true);
-    setStage(null);
   }, []);
+
+  const completeWithCode = useCallback(
+    async (code: string) => {
+      setStage('Exchanging code…');
+      const tokens = await exchangeCode(code, redirectUri());
+      const session = {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: Date.now() + tokens.expiresIn * 1000,
+        ctidTraderAccountId: 0,
+        isLive: false,
+      };
+      setStage('Connecting to cTrader…');
+      await liveEngine.start(session);
+      await adoptSession();
+      setStage(null);
+    },
+    [adoptSession],
+  );
 
   const connectWithCode = useCallback(
     async (code: string) => {
@@ -135,23 +142,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [completeWithCode],
   );
 
-  const finishLoginWith = useCallback(async (session: CTraderSession) => {
-    try {
-      await saveSession(session);
-      await liveEngine.start(session);
-      const stored = await loadSession();
-      if (!stored) throw new Error('Session was not stored');
-      if (!liveEngine.connected) {
-        throw new Error(liveEngine.getSnapshot().error ?? 'Connection failed');
+  const finishLoginWith = useCallback(
+    async (session: CTraderSession) => {
+      try {
+        await saveSession(session);
+        await liveEngine.start(session);
+        await adoptSession();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Login failed');
+      } finally {
+        setBusy(false);
       }
-      setConnected(true);
-      setLive(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+    },
+    [adoptSession],
+  );
 
   const login = useCallback(async () => {
     setError(null);

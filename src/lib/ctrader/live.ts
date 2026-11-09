@@ -25,6 +25,33 @@ const SYMBOLS_CACHE_KEY = 'ctrader.symbols.v1';
 /** Monotonic suffix so burst closes in the same millisecond get unique ids. */
 let optimisticSeq = 0;
 
+/** Refresh an expiring session and persist the rotated tokens. */
+async function refreshSession(session: CTraderSession): Promise<CTraderSession> {
+  const tokens = await refreshTokens(session.refreshToken);
+  const next: CTraderSession = {
+    ...session,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresAt: Date.now() + tokens.expiresIn * 1000,
+  };
+  await saveSession(next);
+  return next;
+}
+
+/** Normalize a raw symbol row from any list endpoint; nameless rows are dropped. */
+function toSymbolInfo(raw: {
+  symbolId: number;
+  symbolName?: string;
+  digits?: number;
+}): SymbolInfo | null {
+  if (!raw.symbolName) return null;
+  return {
+    symbolId: raw.symbolId,
+    symbolName: normalizeSymbolName(raw.symbolName),
+    digits: typeof raw.digits === 'number' ? raw.digits : 2,
+  };
+}
+
 export interface LiveSnapshot {
   status: 'idle' | 'connecting' | 'ready' | 'error';
   error: string | null;
@@ -121,14 +148,7 @@ class LiveEngine {
   ): Promise<{ session: CTraderSession; accountId: number; account: AccountInfo }> {
     let active = session;
     if (active.expiresAt < Date.now() + 60000) {
-      const tokens = await refreshTokens(active.refreshToken);
-      active = {
-        ...active,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: Date.now() + tokens.expiresIn * 1000,
-      };
-      await saveSession(active);
+      active = await refreshSession(active);
     }
     client.close();
     client.connect(socketUrl(active.isLive ? 'live' : 'demo'));
@@ -246,15 +266,7 @@ class LiveEngine {
         try {
           const current = this.session;
           if (!current) return;
-          const tokens = await refreshTokens(current.refreshToken);
-          const next = {
-            ...current,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            expiresAt: Date.now() + tokens.expiresIn * 1000,
-          };
-          await saveSession(next);
-          this.session = next;
+          this.session = await refreshSession(current);
           this.scheduleTokenRefresh();
         } catch {
           // Next reconnect retries; stream stays usable until expiry.
@@ -478,14 +490,7 @@ class LiveEngine {
         try {
           let active = this.session!;
           if (active.expiresAt < Date.now() + 60000) {
-            const tokens = await refreshTokens(active.refreshToken);
-            active = {
-              ...active,
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-              expiresAt: Date.now() + tokens.expiresIn * 1000,
-            };
-            await saveSession(active);
+            active = await refreshSession(active);
             this.session = active;
             this.scheduleTokenRefresh();
           }
@@ -557,8 +562,9 @@ class LiveEngine {
       symbolName?: string;
       digits?: number;
     }[];
-    rawSymbols.forEach((s) => {
-      if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: typeof s.digits === 'number' ? s.digits : 2 });
+    rawSymbols.forEach((raw) => {
+      const info = toSymbolInfo(raw);
+      if (info) symbols.set(raw.symbolId, info);
     });
 
     const positions = asArray<PositionInfo>(reconcileRes.position).filter(
@@ -584,14 +590,9 @@ class LiveEngine {
           symbolId: [...missing],
         });
         const list = asArray<{ symbolId: number; symbolName?: string; digits?: number }>(byId.symbol);
-        list.forEach((s) => {
-          if (s.symbolName) {
-            symbols.set(s.symbolId, {
-              symbolId: s.symbolId,
-              symbolName: normalizeSymbolName(s.symbolName),
-              digits: typeof s.digits === 'number' ? s.digits : 2,
-            });
-          }
+        list.forEach((raw) => {
+          const info = toSymbolInfo(raw);
+          if (info) symbols.set(raw.symbolId, info);
         });
       } catch {
         // Best effort — cache below still applies.
