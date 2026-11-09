@@ -1,66 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-export type Side = 'buy' | 'sell';
-
-export interface Position {
-  id: number;
-  symbol: string;
-  side: Side;
-  /** Volume in lots, for display. */
-  volume: number;
-  /** Raw protocol volume, echoed back verbatim on close. */
-  rawVolume: number;
-  pl: number;
-  openPrice: number;
-  tp: number;
-  sl: number;
-}
-
-export interface ClosedTrade {
-  id: number;
-  symbol: string;
-  side: Side;
-  volume: number;
-  pl: number;
-  time: string;
-  /** YYYY-MM-DD of the close, for per-day stats. */
-  day: string;
-}
-
-export interface AccountState {
-  balance: number;
-  equity: number;
-  margin: number;
-  freeMargin: number;
-  /** Margin level in percent. 0 when there is no margin (display "—"). */
-  marginLevel: number;
-}
-
-export interface DayStats {
-  trades: number;
-  wins: number;
-  winRate: number;
-  openPL: number;
-  realizedPL: number;
-}
-
-export interface LiveOrder {
-  id: string;
-  symbol: string;
-  side: 'buy' | 'sell';
-  volume: number;
-  limitPrice: number;
-  stopLoss: number;
-  takeProfit: number;
-}
-
-export interface MockAccount {
-  account: AccountState;
-  stats: DayStats;
-  positions: Position[];
-  orders: LiveOrder[];
-  history: ClosedTrade[];
-}
+import { REFERENCE_PRICES } from '@/constants/markets';
+import type { ClosedTrade, MockAccount, Position, Side } from '@/lib/trading/types';
 
 const TICK_MS = 2500;
 const LIFECYCLE_MS = 9000;
@@ -71,42 +12,7 @@ const MAX_HISTORY = 30;
 
 const SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'US30', 'USDJPY'];
 
-const BASE_PRICE: Record<string, number> = {
-  EURUSD: 1.0852,
-  GBPUSD: 1.2694,
-  XAUUSD: 2415.3,
-  BTCUSD: 97400,
-  US30: 44250,
-  USDJPY: 151.2,
-};
-
 let nextId = 1;
-
-const currency = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-});
-
-export function formatMoney(value: number): string {
-  const safe = Number.isFinite(value) ? value : 0;
-  const formatted = currency.format(Math.abs(safe));
-  return safe < 0 ? `-${formatted}` : `+${formatted}`;
-}
-
-export function formatPlainMoney(value: number): string {
-  return currency.format(Number.isFinite(value) ? value : 0);
-}
-
-export function formatPrice(symbol: string, value: number): string {
-  const base = BASE_PRICE[symbol] ?? 100;
-  const safe = Number.isFinite(value) ? value : 0;
-  return base < 10 ? safe.toFixed(4) : safe.toFixed(2);
-}
-
-/** Display-safe lots with exactly 2 decimals (never throws on bad data). */
-export function formatLots(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(2) : '—';
-}
 
 function clockNow(): string {
   return new Date().toLocaleTimeString('en-GB');
@@ -119,9 +25,9 @@ function todayKey(date = new Date()): string {
 function randomPosition(): Position {
   const side: Side = Math.random() < 0.5 ? 'buy' : 'sell';
   const symbol = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-  const openPrice = BASE_PRICE[symbol];
+  const openPrice = REFERENCE_PRICES[symbol];
   const distance = openPrice * (0.002 + Math.random() * 0.006);
-  const dir = side === 'buy' ? 1 : -1;
+  const direction = side === 'buy' ? 1 : -1;
   return {
     id: nextId++,
     symbol,
@@ -130,24 +36,22 @@ function randomPosition(): Position {
     rawVolume: 100,
     pl: (Math.random() - 0.5) * 8,
     openPrice,
-    tp: openPrice + dir * distance,
-    sl: openPrice - dir * distance,
+    tp: openPrice + direction * distance,
+    sl: openPrice - direction * distance,
   };
 }
 
 interface FeedState {
   positions: Position[];
   history: ClosedTrade[];
-  trades: number;
-  wins: number;
 }
 
 /**
- * Mock trading feed: starts flat like a fresh account, then opens/closes
- * positions over time. Same shape the real bot API will provide.
+ * Mock trading feed: starts flat like a fresh account, then opens and closes
+ * positions over time. Shapes match the live feed so screens never branch.
  */
 export function useMockAccount(): MockAccount {
-  const [feed, setFeed] = useState<FeedState>({ positions: [], history: [], trades: 0, wins: 0 });
+  const [feed, setFeed] = useState<FeedState>({ positions: [], history: [] });
   const feedRef = useRef(feed);
 
   useEffect(() => {
@@ -163,11 +67,7 @@ export function useMockAccount(): MockAccount {
     }, TICK_MS);
 
     const lifecycle = setInterval(() => {
-      const prev = feedRef.current;
-      let positions = prev.positions;
-      let history = prev.history;
-      let trades = prev.trades;
-      let wins = prev.wins;
+      let { positions, history } = feedRef.current;
 
       if (positions.length > 0 && Math.random() < 0.35) {
         const index = Math.floor(Math.random() * positions.length);
@@ -185,13 +85,11 @@ export function useMockAccount(): MockAccount {
           },
           ...history,
         ].slice(0, MAX_HISTORY);
-        trades += 1;
-        if (closed.pl > 0) wins += 1;
       }
       if (positions.length < MAX_OPEN && Math.random() < 0.55) {
         positions = [...positions, randomPosition()];
       }
-      setFeed({ positions, history, trades, wins });
+      setFeed({ positions, history });
     }, LIFECYCLE_MS);
 
     return () => {
@@ -204,7 +102,6 @@ export function useMockAccount(): MockAccount {
   const openPL = positions.reduce((sum, p) => sum + p.pl, 0);
   const equity = START_BALANCE + openPL;
   const margin = positions.length * MARGIN_PER_POSITION;
-  const freeMargin = equity - margin;
   const wins = history.filter((t) => t.pl > 0).length;
 
   return {
@@ -212,7 +109,7 @@ export function useMockAccount(): MockAccount {
       balance: START_BALANCE,
       equity,
       margin,
-      freeMargin,
+      freeMargin: equity - margin,
       marginLevel: margin > 0 ? (equity / margin) * 100 : 0,
     },
     stats: {

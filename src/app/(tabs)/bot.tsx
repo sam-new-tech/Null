@@ -23,7 +23,7 @@ import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
-import { formatMoney } from '@/hooks/use-mock-account';
+import { formatMoney } from '@/lib/format';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 

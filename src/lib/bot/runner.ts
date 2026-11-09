@@ -13,7 +13,8 @@
  * - Single managed position at a time (1 position max).
  */
 
-import { liveEngine, scaleSpot } from '../ctrader/live';
+import { liveEngine } from '../ctrader/live';
+import { scaleSpot } from '../ctrader/wire';
 import { Payload } from '../ctrader/protocol';
 import {
   amendPositionSLTP,

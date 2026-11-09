@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { useMockAccount, type MockAccount } from '@/hooks/use-mock-account';
+import { useMockAccount } from '@/hooks/use-mock-account';
+import type { MockAccount } from '@/lib/trading/types';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { asSide, unitsPerLot } from '@/lib/ctrader/orders';
 

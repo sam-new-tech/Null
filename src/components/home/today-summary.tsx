@@ -1,7 +1,7 @@
 import { View } from 'react-native';
 
-import type { DayStats } from '@/hooks/use-mock-account';
-import { formatMoney } from '@/hooks/use-mock-account';
+import type { DayStats } from '@/lib/trading/types';
+import { formatMoney } from '@/lib/format';
 import { Card } from 'panelui-native/components/card';
 import { Text } from 'panelui-native/primitives/text';
 import { GlassSheen } from '@/components/glass-sheen';

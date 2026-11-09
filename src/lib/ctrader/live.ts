@@ -17,6 +17,7 @@ import type {
   TraderInfo,
 } from './protocol';
 import { loadSession, saveSession, type CTraderSession } from './session';
+import { asArray, money, normalizeSymbolName, scaleSpot, secondsSinceMessage } from './wire';
 import { storeGet, storeSet } from '../storage';
 
 const SYMBOLS_CACHE_KEY = 'ctrader.symbols.v1';
@@ -47,38 +48,6 @@ const EMPTY: LiveSnapshot = {
   symbols: new Map(),
   version: 0,
 };
-
-function normalizeSymbolName(name: string): string {
-  return name.replace('/', '').toUpperCase();
-}
-
-function money(value: number | undefined, digits: number | undefined): number {
-  if (value === undefined) return 0;
-  return value / Math.pow(10, digits ?? 2);
-}
-
-/**
- * Spot quotes arrive as 1e5-scaled ints (e.g. XAUUSD ~414613000 for 4146.13).
- * Pre-flattened doubles pass through untouched. Integer check keeps both
- * forms realtime-safe without per-symbol config.
- */
-export function scaleSpot(raw: unknown): number | null {
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
-  return Number.isInteger(raw) ? raw / 100000 : raw;
-}
-
-/** Defensive array: some gateways return a single object, not an array. */
-function asArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[];
-  if (value !== undefined && value !== null) return [value as T];
-  return [];
-}
-
-/** Seconds since the last inbound frame — drives stale-stream UI. */
-export function secondsSinceMessage(lastMessageAt: number, now = Date.now()): number {
-  if (!lastMessageAt) return Number.POSITIVE_INFINITY;
-  return Math.max(0, (now - lastMessageAt) / 1000);
-}
 
 /**
  * Live cTrader data engine (JSON over WebSocket, all platforms).

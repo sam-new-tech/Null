@@ -8,7 +8,7 @@ import { ConnectionBanner } from '@/components/connection-banner';
 import { ScreenErrorBoundary } from '@/components/screen-error-boundary';
 import { LiveBadge, ScreenHeader } from '@/components/screen-header';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { formatLots, formatMoney, formatPrice } from '@/hooks/use-mock-account';
+import { formatLots, formatMoney, formatPrice } from '@/lib/format';
 import { useTrading } from '@/lib/trading/useTrading';
 import { liveEngine } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';

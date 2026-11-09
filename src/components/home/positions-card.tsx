@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
 
-import type { Position } from '@/hooks/use-mock-account';
-import { formatLots, formatMoney, formatPrice } from '@/hooks/use-mock-account';
+import type { Position } from '@/lib/trading/types';
+import { formatLots, formatMoney, formatPrice } from '@/lib/format';
 import { liveEngine } from '@/lib/ctrader/live';
 import { closePosition } from '@/lib/ctrader/orders';
 import { Payload } from '@/lib/ctrader/protocol';

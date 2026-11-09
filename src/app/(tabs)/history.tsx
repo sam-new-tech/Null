@@ -7,7 +7,7 @@ import { GlassSheen } from '@/components/glass-sheen';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ScreenErrorBoundary } from '@/components/screen-error-boundary';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { formatLots, formatMoney } from '@/hooks/use-mock-account';
+import { formatLots, formatMoney } from '@/lib/format';
 import { useTrading } from '@/lib/trading/useTrading';
 import { liveEngine } from '@/lib/ctrader/live';
 import { Button } from 'panelui-native/components/button';
