@@ -1,0 +1,148 @@
+import {
+  calculateIndicators,
+  calculateLots,
+  calculateVDC,
+  evaluateSignal,
+  resample5mEMA,
+  type Bar,
+  type StrategyIndicators,
+} from '@/lib/bot/engine';
+
+function makeBar(index: number, close: number, volume = 1): Bar {
+  return {
+    time: index * 60_000,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume,
+  };
+}
+
+function makeBars(closes: number[]): Bar[] {
+  return closes.map((close, index) => makeBar(index, close));
+}
+
+function indicators(overrides: Partial<StrategyIndicators> = {}): StrategyIndicators {
+  return {
+    ema5m: 99,
+    macdLine: 1,
+    macdSignal: 0.5,
+    macdHist: 0.5,
+    adx: 30,
+    vdc: 25,
+    ...overrides,
+  };
+}
+
+describe('resample5mEMA', () => {
+  it('returns nulls until there are enough closed 5m bars', () => {
+    const bars = makeBars(new Array(100).fill(100));
+    expect(resample5mEMA(bars)).toEqual(new Array(100).fill(null));
+  });
+
+  it('aligns one value per 1m bar and forward-fills the latest EMA', () => {
+    const bars = makeBars(new Array(600).fill(100));
+    const ema = resample5mEMA(bars);
+
+    expect(ema).toHaveLength(600);
+    expect(ema[599]).toBeCloseTo(100);
+
+    const firstValue = ema.findIndex((value) => value !== null);
+    expect(firstValue).toBeGreaterThan(0);
+    expect(ema.slice(firstValue).every((value) => value !== null)).toBe(true);
+  });
+
+  it('handles an empty series', () => {
+    expect(resample5mEMA([])).toEqual([]);
+  });
+});
+
+describe('calculateVDC', () => {
+  it('computes bull/bear volume delta over the window', () => {
+    const bars: Bar[] = [
+      { ...makeBar(0, 101, 10), open: 100 },
+      { ...makeBar(1, 100, 20), open: 101 },
+      { ...makeBar(2, 102, 30), open: 100 },
+      { ...makeBar(3, 101, 40), open: 102 },
+    ];
+    const vdc = calculateVDC(bars, 3);
+
+    expect(vdc[0]).toBeNull();
+    expect(vdc[1]).toBeNull();
+    // Last 3: bull = 10 + 0 + 30 = 40, total = 60, delta = +20.
+    expect(vdc[2]).toBeCloseTo((20 / 60) * 100);
+    // Last 3: bull = 0 + 30 + 0 = 30, total = 90, delta = -30.
+    expect(vdc[3]).toBeCloseTo((-30 / 90) * 100);
+  });
+
+  it('returns zeros when there is no volume', () => {
+    const bars: Bar[] = [
+      { ...makeBar(0, 101, 0), open: 100 },
+      { ...makeBar(1, 100, 0), open: 101 },
+      { ...makeBar(2, 102, 0), open: 100 },
+    ];
+    expect(calculateVDC(bars, 3)[2]).toBe(0);
+  });
+});
+
+describe('calculateLots', () => {
+  it('scales with equity and clamps to [0.01, cap]', () => {
+    expect(calculateLots(0)).toBe(0.01);
+    expect(calculateLots(-100)).toBe(0.01);
+    expect(calculateLots(100)).toBe(0.02);
+    expect(calculateLots(10_000)).toBe(0.05);
+    expect(calculateLots(10_000, 1)).toBe(1);
+    expect(calculateLots(Number.NaN)).toBe(0.01);
+  });
+});
+
+describe('evaluateSignal', () => {
+  const bars = [makeBar(0, 100)];
+
+  it('emits a long signal with a +2.00 target', () => {
+    const signal = evaluateSignal(bars, [indicators()]);
+    expect(signal).toMatchObject({ action: 'buy', price: 100, tp: 102 });
+  });
+
+  it('emits a short signal with a -2.00 target', () => {
+    const signal = evaluateSignal(bars, [
+      indicators({ ema5m: 101, macdLine: 0.5, macdSignal: 1, vdc: -25 }),
+    ]);
+    expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 98 });
+  });
+
+  it('stays flat when a threshold is not strictly exceeded', () => {
+    expect(evaluateSignal(bars, [indicators({ adx: 25 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ vdc: 0 })]).action).toBe('none');
+  });
+
+  it('reports warming up while indicators are null', () => {
+    const signal = evaluateSignal(bars, [
+      indicators({ ema5m: null, macdLine: null, macdSignal: null, adx: null, vdc: null }),
+    ]);
+    expect(signal.action).toBe('none');
+    expect(signal.reason).toBe('Warming up indicators');
+  });
+
+  it('handles an empty series', () => {
+    const signal = evaluateSignal([]);
+    expect(signal.action).toBe('none');
+    expect(signal.reason).toBe('No bars available');
+  });
+});
+
+describe('calculateIndicators', () => {
+  it('returns one entry per bar', () => {
+    const bars = makeBars(new Array(600).fill(2000));
+    const result = calculateIndicators(bars);
+
+    expect(result).toHaveLength(600);
+    expect(Number.isFinite(result[599].ema5m)).toBe(true);
+  });
+
+  it('returns an empty array for no bars', () => {
+    expect(calculateIndicators([])).toEqual([]);
+  });
+});
