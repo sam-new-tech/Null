@@ -18,7 +18,7 @@ import {
   planTick as appPlanTick,
   isUpBar as appIsUpBar,
   type Bar as AppBar,
-} from "../../../src/lib/bot/engine.js";
+} from "./legacy-app-engine.js";
 
 const GOLD_COSTS = { commissionBps: 0.3, spreadBps: 0.5, slippageBps: 0.3 };
 const EQUITY = 10000;

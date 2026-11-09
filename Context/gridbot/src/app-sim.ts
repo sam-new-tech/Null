@@ -1,15 +1,13 @@
-// App-faithful simulator: drives the REAL app engine (src/lib/bot/engine.ts)
-// bar-by-bar over M15 gold, with intra-bar ticks so spot-crossing behaves
-// like live onSpot(). Run: npx tsx src/app-sim.ts
+// Legacy grid simulator (the app now ships a momentum strategy).
+// Drives the archived grid engine bar-by-bar over M15 gold, with intra-bar
+// ticks so spot-crossing behaves like live onSpot(). Run: npx tsx src/app-sim.ts
 import { loadCsv, resample } from "./market.js";
-// NOTE: relative import reaches outside the context package on purpose —
-// this is the exact module the app ships.
 import {
   buildGrid as appBuildGrid,
   planTick as appPlanTick,
   isUpBar as appIsUpBar,
   type Bar as AppBar,
-} from "../../../src/lib/bot/engine.js";
+} from "./legacy-app-engine.js";
 
 const GOLD_COSTS = { commissionBps: 0.3, spreadBps: 0.5, slippageBps: 0.3 };
 const EQUITY = 10000;

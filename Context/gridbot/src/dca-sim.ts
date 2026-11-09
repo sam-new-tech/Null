@@ -3,7 +3,7 @@
 // basket exit at avg +/- 0.5 step, disaster 8 steps, escape re-anchor.
 // Run: npx tsx src/dca-sim.ts — full + folds + test must stay green.
 import { loadCsv, resample } from "./market.js";
-import { atr as appAtr, isUpBar as appIsUpBar } from "../../../src/lib/bot/engine.js";
+import { atr as appAtr, isUpBar as appIsUpBar } from "./legacy-app-engine.js";
 
 const GOLD = { commissionBps: 0.3, spreadBps: 0.5, slippageBps: 0.3 };
 const EQUITY = 10000;

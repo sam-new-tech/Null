@@ -258,7 +258,7 @@ async function main() {
       greenFolds: green,
       train: tr?.ret.toFixed(1) ?? "n/a",
       test: te?.ret.toFixed(1) ?? "n/a",
-      halted,
+      halted: halted ? "YES" : "no",
       testDD: te?.dd.toFixed(1) ?? "n/a",
       testPF: te && Number.isFinite(te.pf) ? +te.pf.toFixed(2) : -1,
       testWin: te ? +te.win.toFixed(1) : -1,

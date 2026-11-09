@@ -1,4 +1,4 @@
-x// Grid+DCA filter sweep — finds the best first-entry filter with evidence.
+// Grid+DCA filter sweep — finds the best first-entry filter with evidence.
 //
 // Engine: Grid first entries (ATR14 x2.0, 10 levels, M1 gold) + DCA books
 // (max 3/side, adds every adverse step up to 6, basket exit avg ± 0.5 step,
