@@ -1,5 +1,9 @@
 # Grid+DCA Filter Sweep — Results
 
+> **Legacy research only.** These results describe the retired grid/DCA
+> strategy, not the momentum strategy the app ships today. See the note in
+> `README.md`.
+
 **Date:** 2026-10-13
 **Data:** XAUUSD M1 (12-month Dukascopy, ~111k bars) + 2 out-of-sample datasets
 **Engine:** Runner-parity (ATR14 ×2.0, 10 levels, DCA books max 3/side, 6 adds, basket ±0.5 step, escape 8 steps, per-leg TP ±1 step, gold costs 0.3/0.5/0.3 bps)

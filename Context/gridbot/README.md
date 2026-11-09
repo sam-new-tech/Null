@@ -1,5 +1,11 @@
 # Grid Backtest (TypeScript)
 
+> **Legacy research only.** The shipped app now runs a 1-minute XAU/USD
+> momentum strategy (`src/lib/bot/engine.ts` + `runner.ts`). The grid engine
+> these scripts used was removed from the app and is archived here as
+> `src/legacy-app-engine.ts`. Results below describe the old grid strategy,
+> not the live bot.
+
 ATR grid, both-sides, trailing, bounce entries. Full costs on every fill
 (commission + half-spread + slippage). $100 start. Validated on 12-month gold.
 
