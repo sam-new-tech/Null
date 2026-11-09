@@ -1,0 +1,41 @@
+[
+  {
+    "config": "stack-align",
+    "f0": "-10.6",
+    "f1": "35.0",
+    "f2": "-7.5",
+    "worstFold": -10.6,
+    "greenFolds": 1,
+    "train": "3.9",
+    "test": "35.0",
+    "testPF": 2.94,
+    "testWin": 99.2,
+    "testDD": 15.7
+  },
+  {
+    "config": "stack-fade",
+    "f0": "-21.8",
+    "f1": "29.8",
+    "f2": "25.4",
+    "worstFold": -21.8,
+    "greenFolds": 2,
+    "train": "11.4",
+    "test": "-14.3",
+    "testPF": 0.82,
+    "testWin": 96.8,
+    "testDD": 34.5
+  },
+  {
+    "config": "stack-current(none)",
+    "f0": "-23.9",
+    "f1": "28.2",
+    "f2": "32.1",
+    "worstFold": -23.9,
+    "greenFolds": 2,
+    "train": "19.5",
+    "test": "0.2",
+    "testPF": 1.1,
+    "testWin": 97.3,
+    "testDD": 27.9
+  }
+]

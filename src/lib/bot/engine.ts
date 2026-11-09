@@ -1,8 +1,23 @@
-// Pure grid-bot logic: ATR grid construction, per-tick entry planning, sizing.
-// No imports, no I/O, no timers. Mirrors the limit semantics of
-// Context/gridbot backtest: longs buy lower[] levels and exit +step;
-// shorts sell upper[] and cover -step; one lot per level within
-// 0.49xstep; bounce entries (longs on up-bars, shorts on down-bars).
+/**
+ * XAU/USD Momentum Trend Strategy Engine.
+ *
+ * Implements the exact backtested quantitative strategy:
+ * - Timeframe: 1-minute bars
+ * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
+ * - 1-minute MACD(12, 26, 9)
+ * - 1-minute ADX(14) (threshold: > 25.0)
+ * - 1-minute VDC (Volume Delta Control, timeperiod=20, threshold=20.0, splitmode="candle")
+ *
+ * Signals:
+ * - Long:  price > ema50_5m AND macd_line > macd_signal AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
+ * - Short: price < ema50_5m AND macd_line < macd_signal AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
+ *
+ * Position Rules:
+ * - Single managed position at a time (flat or in 1 trade).
+ * - Fixed $2.00 target on Gold from entry price.
+ */
+
+import { ADX, EMA, MACD } from 'fast-technical-indicators';
 
 export interface Bar {
   time: number;
@@ -10,240 +25,323 @@ export interface Bar {
   high: number;
   low: number;
   close: number;
+  volume: number;
 }
 
-export interface GridSetup {
-  base: number;
-  step: number;
-  range: { lo: number; hi: number };
-  lower: number[];
-  upper: number[];
+export interface StrategyIndicators {
+  ema5m: number | null;
+  macdLine: number | null;
+  macdSignal: number | null;
+  macdHist: number | null;
+  adx: number | null;
+  vdc: number | null;
 }
 
-export interface BotPosition {
-  id: string;
-  side: 'buy' | 'sell';
-  entry: number;
-}
-
-export interface RestingOrder {
-  id: string;
-  side: 'buy' | 'sell';
+export interface StrategySignal {
+  action: 'buy' | 'sell' | 'none';
   price: number;
+  tp: number;
+  ema5m: number | null;
+  macdLine: number | null;
+  macdSignal: number | null;
+  adx: number | null;
+  vdc: number | null;
+  reason: string;
 }
 
-export type Intent =
-  | { type: 'place'; side: 'buy' | 'sell'; level: number; tp: number; sl: number; volumeLots: number }
-  | { type: 'cancel'; orderId: string }
-  | { type: 'close'; positionId: string; volumeLots: number }
-  | { type: 'escape' };
+export const STRATEGY_PARAMS = {
+  symbol: 'XAUUSD',
+  adxThreshold: 25.0,
+  vdcThreshold: 20.0,
+  tpDelta: 2.0, // Fixed $2.00 gold profit target
+  ema5mPeriod: 50,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignal: 9,
+  adxPeriod: 14,
+  vdcPeriod: 20,
+} as const;
 
-export function isUpBar(bar: Bar): boolean {
-  return bar.close >= bar.open;
-}
+/**
+ * Resample 1m bars into 5m closes matching pandas `resample('5min', label='right', closed='right').last()`.
+ * Computes EMA(50) on the 5m bars and forward-fills back to 1m bars.
+ */
+export function resample5mEMA(bars: Bar[], period = STRATEGY_PARAMS.ema5mPeriod): (number | null)[] {
+  const n = bars.length;
+  if (n === 0) return [];
 
-// Wilder ATR (RMA): first value = SMA of the first `period` true ranges,
-// then RMA. Entries before seeding are null. Total: never throws.
-export function atr(bars: Bar[], period: number): (number | null)[] {
-  const out: (number | null)[] = new Array(bars.length).fill(null);
-  if (!Number.isFinite(period)) return out;
-  const p = Math.floor(period);
-  if (p < 1) return out;
-  let count = 0;
-  let sum = 0;
-  let rma = 0;
-  let seeded = false;
-  for (let i = 0; i < bars.length; i++) {
+  const intervalMs = 5 * 60 * 1000;
+  // Map interval boundary -> last close in interval (closed='right', label='right')
+  const fiveMinMap = new Map<number, number>();
+  for (let i = 0; i < n; i++) {
     const b = bars[i];
-    let t: number;
-    if (i === 0) {
-      t = b.high - b.low;
-    } else {
-      const pc = bars[i - 1].close;
-      t = Math.max(b.high - b.low, Math.abs(b.high - pc), Math.abs(b.low - pc));
-    }
-    if (!Number.isFinite(t)) {
-      count = 0;
-      sum = 0;
-      seeded = false;
-      out[i] = null;
-      continue;
-    }
-    if (!seeded) {
-      sum += t;
-      count += 1;
-      if (count === p) {
-        rma = sum / p;
-        seeded = true;
-        out[i] = rma;
-      } else {
-        out[i] = null;
-      }
-    } else {
-      rma = (rma * (p - 1) + t) / p;
-      out[i] = Number.isFinite(rma) ? rma : null;
-      if (out[i] === null) {
-        seeded = false;
-        count = 0;
-        sum = 0;
-      }
-    }
+    const bucketKey = Math.ceil(b.time / intervalMs) * intervalMs;
+    fiveMinMap.set(bucketKey, b.close);
   }
+
+  const sortedBuckets = Array.from(fiveMinMap.keys()).sort((a, b) => a - b);
+  const closes5m = sortedBuckets.map((k) => fiveMinMap.get(k)!);
+
+  if (closes5m.length < period) {
+    return new Array<number | null>(n).fill(null);
+  }
+
+  const ema5mValues = EMA.calculate({ period, values: closes5m });
+  const bucketEmaMap = new Map<number, number>();
+  for (let i = 0; i < ema5mValues.length; i++) {
+    const bucketKey = sortedBuckets[i + (period - 1)];
+    bucketEmaMap.set(bucketKey, ema5mValues[i]);
+  }
+
+  // Forward fill: for any 1m bar at timestamp t, the latest completed 5m bucket is Math.floor(t / 5m) * 5m
+  const out = new Array<number | null>(n);
+  let lastKnownEma: number | null = null;
+  for (let i = 0; i < n; i++) {
+    const completedKey = Math.floor(bars[i].time / intervalMs) * intervalMs;
+    if (bucketEmaMap.has(completedKey)) {
+      lastKnownEma = bucketEmaMap.get(completedKey)!;
+    }
+    out[i] = lastKnownEma;
+  }
+
   return out;
 }
 
-// Anchor = last CLOSED bar close; step = ATR(at anchor) x gridMult;
-// lower/upper = 1..levels steps from base. Throws on non-finite/zero step.
-export function buildGrid(bars: Bar[], atrLen: number, gridMult: number, levels: number): GridSetup {
-  const anchor = bars.length - 1;
-  const base = anchor >= 0 ? bars[anchor].close : NaN;
-  const a = atr(bars, atrLen);
-  const atrAt = anchor >= 0 ? a[anchor] : null;
-  const step = (atrAt === null ? NaN : (atrAt as number)) * gridMult;
-  if (!Number.isFinite(step) || step <= 0) {
-    throw new Error(`buildGrid: bad step (atr=${String(atrAt)}, mult=${String(gridMult)})`);
-  }
-  if (!Number.isFinite(base)) {
-    throw new Error('buildGrid: anchor close is not finite');
-  }
-  if (!Number.isFinite(levels) || Math.floor(levels) < 1) {
-    throw new Error(`buildGrid: levels must be >= 1 (got ${String(levels)})`);
-  }
-  const lv = Math.floor(levels);
-  const lower: number[] = [];
-  for (let i = lv; i >= 1; i--) lower.push(base - i * step);
-  const upper: number[] = [];
-  for (let i = 1; i <= lv; i++) upper.push(base + i * step);
-  return { base, step, range: { lo: base - lv * step, hi: base + lv * step }, lower, upper };
-}
+/**
+ * Compute Volume Delta Control (VDC) indicator.
+ * Matches Pine Script / Python port `vdc.py` exactly (candle mode).
+ *
+ * bull_vol = volume if close >= open else 0.0
+ * bear_vol = volume - bull_vol
+ * delta = rolling_sum(bull_vol, 20) - rolling_sum(bear_vol, 20)
+ * vdc = delta / rolling_sum(volume, 20) * 100
+ */
+export function calculateVDC(bars: Bar[], period = STRATEGY_PARAMS.vdcPeriod): (number | null)[] {
+  const n = bars.length;
+  const out = new Array<number | null>(n).fill(null);
+  if (n < period) return out;
 
-export function planTick(args: {
-  grid: GridSetup;
-  price: number;
-  prevPrice: number | null;
-  barDir: 'up' | 'down' | null;
-  positions: BotPosition[];
-  orders: RestingOrder[];
-  volumeLots: number;
-  disasterSteps?: number;
-}): Intent[] {
-  const { grid, price, prevPrice, barDir, positions, orders, volumeLots } = args;
-  const disasterSteps = args.disasterSteps ?? 8;
-  if (!Number.isFinite(price)) return [];
-  const lo = grid?.range?.lo;
-  const hi = grid?.range?.hi;
-  if (Number.isFinite(lo) && Number.isFinite(hi)) {
-    if (price < (lo as number) || price > (hi as number)) return [{ type: 'escape' }];
-  }
-  const step = grid?.step;
-  if (!Number.isFinite(step) || (step as number) <= 0) return [];
-  const s = step as number;
-  const tol = 0.49 * s;
-  const ds = Number.isFinite(disasterSteps) && (disasterSteps as number) > 0 ? (disasterSteps as number) : 8;
-  const pos = Array.isArray(positions) ? positions : [];
-  const ord = Array.isArray(orders) ? orders : [];
-  const intents: Intent[] = [];
+  let bullSum = 0;
+  let totalSum = 0;
+  const bullVol = new Float64Array(n);
+  const totalVol = new Float64Array(n);
 
-  if (barDir === 'up') {
-    const lower = Array.isArray(grid.lower) ? grid.lower : [];
-    for (const L of lower) {
-      if (!Number.isFinite(L)) continue;
-      const touched = prevPrice !== null && prevPrice !== undefined ? prevPrice > L && price <= L : price <= L;
-      if (!touched) continue;
-      if (pos.some((p) => p.side === 'buy' && Number.isFinite(p.entry) && Math.abs(p.entry - L) < tol)) continue;
-      if (ord.some((o) => o.side === 'buy' && Number.isFinite(o.price) && Math.abs(o.price - L) < tol)) continue;
-      intents.push({ type: 'place', side: 'buy', level: L, tp: L + s, sl: L - ds * s, volumeLots });
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const vol = Number.isFinite(b.volume) && b.volume > 0 ? b.volume : 0;
+    const isBull = b.close >= b.open;
+    const bv = isBull ? vol : 0.0;
+
+    bullVol[i] = bv;
+    totalVol[i] = vol;
+
+    bullSum += bv;
+    totalSum += vol;
+
+    if (i >= period) {
+      bullSum -= bullVol[i - period];
+      totalSum -= totalVol[i - period];
+    }
+
+    if (i >= period - 1) {
+      const bearSum = totalSum - bullSum;
+      const delta = bullSum - bearSum;
+      out[i] = totalSum > 0 ? (delta / totalSum) * 100.0 : 0.0;
     }
   }
 
-  if (barDir === 'down') {
-    const upper = Array.isArray(grid.upper) ? grid.upper : [];
-    for (const U of upper) {
-      if (!Number.isFinite(U)) continue;
-      const touched = prevPrice !== null && prevPrice !== undefined ? prevPrice < U && price >= U : price >= U;
-      if (!touched) continue;
-      if (pos.some((p) => p.side === 'sell' && Number.isFinite(p.entry) && Math.abs(p.entry - U) < tol)) continue;
-      if (ord.some((o) => o.side === 'sell' && Number.isFinite(o.price) && Math.abs(o.price - U) < tol)) continue;
-      intents.push({ type: 'place', side: 'sell', level: U, tp: U - s, sl: U + ds * s, volumeLots });
+  return out;
+}
+
+/**
+ * Calculate all indicators for the given 1m bars.
+ * Returns an array of StrategyIndicators aligned with the input bars.
+ */
+export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
+  const n = bars.length;
+  const out: StrategyIndicators[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    out[i] = {
+      ema5m: null,
+      macdLine: null,
+      macdSignal: null,
+      macdHist: null,
+      adx: null,
+      vdc: null,
+    };
+  }
+
+  if (n === 0) return out;
+
+  // 1. 5m EMA(50) forward filled
+  const ema5mArray = resample5mEMA(bars, STRATEGY_PARAMS.ema5mPeriod);
+  for (let i = 0; i < n; i++) {
+    out[i].ema5m = ema5mArray[i];
+  }
+
+  // 2. 1m VDC(20)
+  const vdcArray = calculateVDC(bars, STRATEGY_PARAMS.vdcPeriod);
+  for (let i = 0; i < n; i++) {
+    out[i].vdc = vdcArray[i];
+  }
+
+  // 3. 1m MACD(12, 26, 9)
+  const closes1m = bars.map((b) => b.close);
+  if (n >= STRATEGY_PARAMS.macdSlow) {
+    const macdResults = MACD.calculate({
+      values: closes1m,
+      fastPeriod: STRATEGY_PARAMS.macdFast,
+      slowPeriod: STRATEGY_PARAMS.macdSlow,
+      signalPeriod: STRATEGY_PARAMS.macdSignal,
+      SimpleMAOscillator: false,
+      SimpleMASignal: false,
+    });
+
+    const macdOffset = STRATEGY_PARAMS.macdSlow - 1; // 25
+    for (let r = 0; r < macdResults.length; r++) {
+      const barIdx = r + macdOffset;
+      if (barIdx < n) {
+        const item = macdResults[r];
+        out[barIdx].macdLine = item.MACD ?? null;
+        out[barIdx].macdSignal = item.signal ?? null;
+        out[barIdx].macdHist = item.histogram ?? null;
+      }
     }
   }
 
-  return intents;
-}
+  // 4. 1m ADX(14)
+  if (n >= 28) {
+    const adxResults = ADX.calculate({
+      period: STRATEGY_PARAMS.adxPeriod,
+      high: bars.map((b) => b.high),
+      low: bars.map((b) => b.low),
+      close: closes1m,
+    });
 
-// --- DCA books (verified sim: first entries on the grid, adds every adverse
-// step up to maxAdds, basket exit at average ± basketSteps*step). ---
-
-/** Average entry of a book's legs. NaN when empty. */
-export function dcaAvg(legs: { entry: number }[]): number {
-  if (!Array.isArray(legs) || legs.length === 0) return NaN;
-  let sum = 0;
-  let qty = 0;
-  for (const l of legs) {
-    if (!Number.isFinite(l.entry)) return NaN;
-    sum += l.entry;
-    qty += 1;
+    // ADX has warm-up: 1 bar diff + (period - 1) wilder + (period - 1) SMA = 27 bars offset
+    const adxOffset = 27;
+    for (let r = 0; r < adxResults.length; r++) {
+      const barIdx = r + adxOffset;
+      if (barIdx < n) {
+        out[barIdx].adx = adxResults[r].adx ?? null;
+      }
+    }
   }
-  return qty > 0 ? sum / qty : NaN;
+
+  return out;
 }
 
-/** Basket target: average ± basketSteps * step. */
-export function dcaTarget(avg: number, side: 'buy' | 'sell', step: number, basketSteps: number): number {
-  if (!Number.isFinite(avg) || !Number.isFinite(step) || step <= 0 || !Number.isFinite(basketSteps)) return NaN;
-  return side === 'buy' ? avg + basketSteps * step : avg - basketSteps * step;
-}
-
-/** Next DCA add price: average ∓ one step. */
-export function dcaNextAdd(avg: number, side: 'buy' | 'sell', step: number): number {
-  if (!Number.isFinite(avg) || !Number.isFinite(step) || step <= 0) return NaN;
-  return side === 'buy' ? avg - step : avg + step;
-}
-
-/** Crossed `level` between prevPrice and price (direction-aware). */
-export function crossedLevel(side: 'buy' | 'sell', level: number, prevPrice: number | null, price: number): boolean {
-  if (!Number.isFinite(level) || !Number.isFinite(price)) return false;
-  if (prevPrice === null || prevPrice === undefined || !Number.isFinite(prevPrice)) {
-    return side === 'buy' ? price <= level : price >= level;
+/**
+ * Evaluate strategy signal on the latest closed bar.
+ */
+export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): StrategySignal {
+  if (bars.length === 0) {
+    return {
+      action: 'none',
+      price: 0,
+      tp: 0,
+      ema5m: null,
+      macdLine: null,
+      macdSignal: null,
+      adx: null,
+      vdc: null,
+      reason: 'No bars available',
+    };
   }
-  return side === 'buy' ? prevPrice > level && price <= level : prevPrice < level && price >= level;
+
+  const lastIdx = bars.length - 1;
+  const lastBar = bars[lastIdx];
+  const price = lastBar.close;
+
+  const indList = indicators ?? calculateIndicators(bars);
+  const ind = indList[lastIdx];
+
+  if (
+    ind.ema5m === null ||
+    ind.macdLine === null ||
+    ind.macdSignal === null ||
+    ind.adx === null ||
+    ind.vdc === null
+  ) {
+    return {
+      action: 'none',
+      price,
+      tp: 0,
+      ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
+      adx: ind.adx,
+      vdc: ind.vdc,
+      reason: 'Warming up indicators',
+    };
+  }
+
+  const macdUp = ind.macdLine > ind.macdSignal;
+  const macdDown = ind.macdLine < ind.macdSignal;
+
+  // Long entry condition:
+  // price > ema AND macd_line > macd_signal AND adx > 25.0 AND vdc > 20.0
+  if (
+    price > ind.ema5m &&
+    macdUp &&
+    ind.adx > STRATEGY_PARAMS.adxThreshold &&
+    ind.vdc > STRATEGY_PARAMS.vdcThreshold
+  ) {
+    return {
+      action: 'buy',
+      price,
+      tp: price + STRATEGY_PARAMS.tpDelta,
+      ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
+      adx: ind.adx,
+      vdc: ind.vdc,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bull && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
+    };
+  }
+
+  // Short entry condition:
+  // price < ema AND macd_line < macd_signal AND adx > 25.0 AND vdc < -20.0
+  if (
+    price < ind.ema5m &&
+    macdDown &&
+    ind.adx > STRATEGY_PARAMS.adxThreshold &&
+    ind.vdc < -STRATEGY_PARAMS.vdcThreshold
+  ) {
+    return {
+      action: 'sell',
+      price,
+      tp: price - STRATEGY_PARAMS.tpDelta,
+      ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
+      adx: ind.adx,
+      vdc: ind.vdc,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bear && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
+    };
+  }
+
+  return {
+    action: 'none',
+    price,
+    tp: 0,
+    ema5m: ind.ema5m,
+    macdLine: ind.macdLine,
+    macdSignal: ind.macdSignal,
+    adx: ind.adx,
+    vdc: ind.vdc,
+    reason: 'Waiting for signal criteria',
+  };
 }
 
-// Auto lots from equity (video-EA style compounding): 0.01 lots per $500,
-// floored to 0.01, capped. Scales up as equity grows, never exceeds cap.
-export function lotsForEquity(equity: number, cap = 0.05): number {
+/**
+ * Standard lot sizing based on account equity, clamped between 0.01 and maxLots.
+ * 0.01 lot per $50 of equity (equity / 5000), default cap 0.05.
+ */
+export function calculateLots(equity: number, cap = 0.05): number {
   if (!Number.isFinite(equity) || equity <= 0) return 0.01;
-  const lots = Math.floor(equity / 500) * 0.01;
-  return Math.min(cap, Math.max(0.01, Math.floor(lots * 100) / 100));
+  const scaled = Math.floor((equity / 10000) * 2 * 100) / 100;
+  return Math.max(0.01, Math.min(cap, scaled));
 }
 
-// lots = marginPerLevel x leverage / (price x unitsPerLot), floored to
-// 0.01, min 0.01. Returns 0 on invalid inputs. Total: never throws.
-export function lotsFor(marginPerLevel: number, price: number, leverage: number, unitsPerLot: number): number {
-  if (
-    !Number.isFinite(marginPerLevel) || marginPerLevel <= 0 ||
-    !Number.isFinite(price) || price <= 0 ||
-    !Number.isFinite(leverage) || leverage <= 0 ||
-    !Number.isFinite(unitsPerLot) || unitsPerLot <= 0
-  ) {
-    return 0;
-  }
-  const raw = (marginPerLevel * leverage) / (price * unitsPerLot);
-  if (!Number.isFinite(raw) || raw <= 0) return 0;
-  const floored = Math.floor(raw * 100 + 1e-9) / 100;
-  return floored < 0.01 ? 0.01 : floored;
-}
-
-// Inverse of lotsFor: margin locked for `lots` at `price`.
-// Returns 0 on invalid inputs. Total: never throws.
-export function marginFor(lots: number, price: number, leverage: number, unitsPerLot: number): number {
-  if (
-    !Number.isFinite(lots) || lots < 0 ||
-    !Number.isFinite(price) || price <= 0 ||
-    !Number.isFinite(leverage) || leverage <= 0 ||
-    !Number.isFinite(unitsPerLot) || unitsPerLot <= 0
-  ) {
-    return 0;
-  }
-  const margin = (lots * price * unitsPerLot) / leverage;
-  return Number.isFinite(margin) && margin > 0 ? margin : 0;
-}
+export const videoLots = calculateLots;

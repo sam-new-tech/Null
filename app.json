@@ -8,6 +8,7 @@
     "scheme": "xliquid",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.samuwayo.nullapp",
       "icon": {
         "dark": "./assets/images/icon.png",
         "light": "./assets/images/ios-light.png",
@@ -25,7 +26,7 @@
       "package": "com.samuwayo.nullapp"
     },
     "web": {
-      "output": "static",
+      "output": "server",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -43,7 +44,8 @@
         }
       ],
       "expo-secure-store",
-      "expo-background-task"
+      "expo-background-task",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

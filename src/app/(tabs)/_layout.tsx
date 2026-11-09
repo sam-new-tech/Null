@@ -12,9 +12,10 @@ export default function TabsLayout() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const insets = useSafeAreaInsets();
+  const dark = scheme === 'dark';
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <Tabs>
         <SafeAreaView edges={['top']} style={styles.slot}>
           <TabSlot style={styles.slot} />
@@ -23,14 +24,14 @@ export default function TabsLayout() {
           style={[
             styles.pill,
             {
-              bottom: insets.bottom + 16,
-              backgroundColor: 'rgba(12,12,12,0.55)',
+              bottom: Math.max(insets.bottom, 0) + 16,
+              backgroundColor: dark ? 'rgba(12,12,12,0.55)' : 'rgba(255,255,255,0.75)',
               borderColor: colors.backgroundSelected,
             },
           ]}>
           <BlurView
             intensity={60}
-            tint="dark"
+            tint={dark ? 'dark' : 'light'}
             style={StyleSheet.absoluteFill}
           />
           <GlassSheen radius={999} />

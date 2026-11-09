@@ -52,11 +52,17 @@ export async function loadSession(): Promise<CTraderSession | null> {
     get('isLive'),
   ]);
   if (!accessToken || !refreshToken || !expiresAt || !accountId) return null;
+  const expiresAtMs = Number(expiresAt);
+  const accountIdNum = Number(accountId);
+  // Corrupt stores ("undefined", "abc") must not poison token math or auth.
+  if (!Number.isFinite(expiresAtMs) || !Number.isFinite(accountIdNum) || accountIdNum <= 0) {
+    return null;
+  }
   return {
     accessToken,
     refreshToken,
-    expiresAt: Number(expiresAt),
-    ctidTraderAccountId: Number(accountId),
+    expiresAt: expiresAtMs,
+    ctidTraderAccountId: accountIdNum,
     isLive: isLive === '1',
   };
 }

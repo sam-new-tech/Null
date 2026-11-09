@@ -6,6 +6,7 @@ interface Pending {
   resolve: (payload: Record<string, unknown>) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  graceTimer: ReturnType<typeof setInterval> | null;
 }
 
 const REQUEST_TIMEOUT_MS = 15000;
@@ -30,18 +31,87 @@ export class CTraderClient {
   /** Timestamp of the last inbound frame (any type). */
   lastMessageAt = 0;
 
-  onStateChange: ((state: ConnectionState) => void) | null = null;
+  private stateListeners = new Set<(state: ConnectionState) => void>();
+  private legacyStateHandler: ((state: ConnectionState) => void) | null = null;
+
+  /** Backward-compat single handler (used by older call sites). */
+  get onStateChange(): ((state: ConnectionState) => void) | null {
+    return this.legacyStateHandler;
+  }
+
+  set onStateChange(fn: ((state: ConnectionState) => void) | null) {
+    if (this.legacyStateHandler) this.stateListeners.delete(this.legacyStateHandler);
+    this.legacyStateHandler = fn;
+    if (fn) this.stateListeners.add(fn);
+  }
+
+  /** Production-safe multi-subscriber state listener. Never clobbers others. */
+  onState(handler: (state: ConnectionState) => void): () => void {
+    this.stateListeners.add(handler);
+    return () => {
+      this.stateListeners.delete(handler);
+      if (this.legacyStateHandler === handler) this.legacyStateHandler = null;
+    };
+  }
+
+  /** True only when the socket can send right now. */
+  get isOpen(): boolean {
+    return this.state === 'open' && this.ws?.readyState === WebSocket.OPEN;
+  }
 
   connect(url: string): void {
     this.url = url;
     this.wantOpen = true;
     this.backoffMs = 1000;
+    // A stale reconnect timer would open() a second socket after this one.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    // Drop any half-open socket from a previous generation first.
+    try {
+      this.ws?.close();
+    } catch {
+      // Ignore — a fresh socket replaces it below.
+    }
+    this.ws = null;
     this.open();
+  }
+
+  /**
+   * Recycle a silent socket WITHOUT standing down the reconnect loop.
+   * Unlike close(), the watcher re-opens and re-auths after this.
+   */
+  recycle(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.stopHeartbeat();
+    this.failPending(new Error('Connection recycled'));
+    try {
+      this.ws?.close();
+    } catch {
+      // Ignore — onclose schedules the reconnect below.
+    }
+    this.ws = null;
+    if (this.wantOpen) {
+      this.setState('connecting');
+      this.reconnectTimer = setTimeout(() => this.open(), 1000);
+    } else {
+      this.setState('closed');
+    }
   }
 
   private setState(state: ConnectionState): void {
     this.state = state;
-    this.onStateChange?.(state);
+    this.stateListeners.forEach((fn) => {
+      try {
+        fn(state);
+      } catch {
+        // One bad listener must not break the connection loop.
+      }
+    });
   }
 
   private open(): void {
@@ -89,7 +159,10 @@ export class CTraderClient {
 
   close(): void {
     this.wantOpen = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.stopHeartbeat();
     this.failPending(new Error('Connection closed'));
     this.ws?.close();
@@ -112,17 +185,28 @@ export class CTraderClient {
     const raw = encode(payloadType, payload);
     const { clientMsgId } = JSON.parse(raw) as { clientMsgId: string };
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(clientMsgId);
-        reject(new Error('Request timed out'));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(clientMsgId, { resolve, reject, timer });
+      const entry: Pending = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          if (entry.graceTimer) clearInterval(entry.graceTimer);
+          this.pending.delete(clientMsgId);
+          reject(new Error('Request timed out'));
+        }, REQUEST_TIMEOUT_MS),
+        graceTimer: null,
+      };
+      this.pending.set(clientMsgId, entry);
       const fail = (err: Error) => {
         this.pending.delete(clientMsgId);
-        clearTimeout(timer);
+        clearTimeout(entry.timer);
+        if (entry.graceTimer) clearInterval(entry.graceTimer);
         reject(err);
       };
       const sendNow = () => {
+        if (entry.graceTimer) {
+          clearInterval(entry.graceTimer);
+          entry.graceTimer = null;
+        }
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           fail(new Error('Not connected'));
           return;
@@ -136,9 +220,8 @@ export class CTraderClient {
       if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
         // Brief grace for an in-flight (re)connect instead of instant reject.
         const waited = Date.now();
-        const iv = setInterval(() => {
+        entry.graceTimer = setInterval(() => {
           if (!this.ws || this.ws.readyState !== WebSocket.CONNECTING || Date.now() - waited > 5000) {
-            clearInterval(iv);
             sendNow();
           }
         }, 100);
@@ -172,25 +255,34 @@ export class CTraderClient {
   private dispatch(msg: WireMessage): void {
     this.lastMessageAt = Date.now();
     if (msg.clientMsgId && this.pending.has(msg.clientMsgId)) {
-      const { resolve, reject, timer } = this.pending.get(msg.clientMsgId)!;
+      const entry = this.pending.get(msg.clientMsgId)!;
       this.pending.delete(msg.clientMsgId);
-      clearTimeout(timer);
+      clearTimeout(entry.timer);
+      if (entry.graceTimer) clearInterval(entry.graceTimer);
       if (msg.payloadType === Payload.ErrorRes) {
         const payload = (msg.payload ?? {}) as { errorCode?: string; description?: string };
-        reject(new Error(payload.description ?? payload.errorCode ?? 'Request failed'));
+        entry.reject(new Error(payload.description ?? payload.errorCode ?? 'Request failed'));
         return;
       }
-      resolve((msg.payload ?? {}) as Record<string, unknown>);
+      entry.resolve((msg.payload ?? {}) as Record<string, unknown>);
       return;
     }
     const set = this.handlers.get(msg.payloadType);
-    set?.forEach((handler) => handler((msg.payload ?? {}) as Record<string, unknown>));
+    // One throwing subscriber must not silence the rest of the frame.
+    set?.forEach((handler) => {
+      try {
+        handler((msg.payload ?? {}) as Record<string, unknown>);
+      } catch {
+        // Engine handlers are fail-open; the stream stays usable.
+      }
+    });
   }
 
   private failPending(err: Error): void {
-    this.pending.forEach(({ reject, timer }) => {
-      clearTimeout(timer);
-      reject(err);
+    this.pending.forEach((entry) => {
+      clearTimeout(entry.timer);
+      if (entry.graceTimer) clearInterval(entry.graceTimer);
+      entry.reject(err);
     });
     this.pending.clear();
   }

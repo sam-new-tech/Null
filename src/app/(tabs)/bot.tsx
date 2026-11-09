@@ -1,18 +1,22 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { memo, useEffect, useState, useSyncExternalStore } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 
-import { ScreenHeader } from '@/components/screen-header';
+import { LogoMark, ScreenHeader } from '@/components/screen-header';
+import { ConnectionBanner } from '@/components/connection-banner';
+import { ScreenErrorBoundary } from '@/components/screen-error-boundary';
 import { TAB_CLEARANCE } from '@/constants/tabs';
+import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
-import { botRunner, STRATEGY_RULES } from '@/lib/bot/runner';
-import { lotsForEquity } from '@/lib/bot/engine';
+import { botRunner } from '@/lib/bot/runner';
+import { videoLots } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
@@ -23,7 +27,7 @@ import { formatMoney } from '@/hooks/use-mock-account';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 
-function StatTile({ label, value }: { label: string; value: string }) {
+const StatTile = memo(function StatTile({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flexBasis: '48%', flexGrow: 1 }}>
       <Card>
@@ -39,34 +43,37 @@ function StatTile({ label, value }: { label: string; value: string }) {
       </Card>
     </View>
   );
-}
+});
 
 function LiveDot() {
   const pulse = useSharedValue(1);
   useEffect(() => {
     pulse.value = withRepeat(withTiming(0.3, { duration: 900 }), -1, true);
+    return () => cancelAnimation(pulse);
   }, [pulse]);
   const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
   return <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#34d399' }, style]} />;
 }
 
 function LivePL() {
-  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice);
+  useLive(); // re-render on engine spot updates too, not just bot ticks
+  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice) ?? botRunner.getLivePrice();
   const rev = useSyncExternalStore(botRunner.subscribe, botRunner.getRevision);
   void rev;
   const pl = price === null ? 0 : botRunner.managedPlAt(price);
   const up = pl >= 0;
   return (
-    <Text size="3xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+    <Text size="3xl" weight="bold" numberOfLines={1} className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
       {formatMoney(pl)}
     </Text>
   );
 }
 
 function LivePrice() {
-  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice);
+  useLive(); // re-render on engine spot updates too, not just bot ticks
+  const price = useSyncExternalStore(botRunner.subscribeTick, botRunner.getTickPrice) ?? botRunner.getLivePrice();
   return (
-    <Text size="3xl" weight="bold" className="text-center font-mono">
+    <Text size="3xl" weight="bold" numberOfLines={1} className="text-center font-mono">
       {price !== null ? price.toFixed(2) : '—'}
     </Text>
   );
@@ -74,11 +81,15 @@ function LivePrice() {
 
 export default function BotScreen() {
   const live = useLive();
+  // Subscribe so status.* re-renders in realtime on every bot emit.
   useSyncExternalStore(botRunner.subscribe, botRunner.getRevision);
   const status = botRunner.getStatus();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [stopError, setStopError] = useState<string | null>(null);
 
   useEffect(() => {
     void botRunner.load();
@@ -87,7 +98,18 @@ export default function BotScreen() {
   const running = status.state === 'running';
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
-  const autoLots = lotsForEquity(equity, STRATEGY_RULES.maxLotsPerLevel);
+  const autoLots = videoLots(equity, 0.05);
+  const gateMessage =
+    live.status === 'error'
+      ? (live.error ?? 'Connection failed — retry')
+      : live.status === 'connecting'
+        ? 'Connecting to cTrader…'
+        : 'Connect your cTrader account to arm the bot';
+  // XAUUSD is closed on weekends — the broker confirms nothing until open.
+  const weekend = (() => {
+    const day = new Date().getDay();
+    return day === 0 || day === 6;
+  })();
 
   const confirmStart = async () => {
     if (starting) return;
@@ -105,45 +127,55 @@ export default function BotScreen() {
   };
 
   const stop = async () => {
-    await botRunner.stopAll();
-    await unregisterGridTask();
-    router.replace('/');
+    if (stopping) return;
+    setStopping(true);
+    setStopError(null);    try {
+      await botRunner.stopAll();
+      await unregisterGridTask();
+      setConfirmStop(false);
+      router.replace('/');
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : 'Stop failed — retry');
+    } finally {
+      setStopping(false);
+    }
   };
 
   // Stopped: only the Start button (plus account gate + risk sheet).
   if (!running) {
     return (
+      <ScreenErrorBoundary key={live.status}>
       <View className="flex-1 bg-background">
         <ChartBackdrop />
         <View className="gap-4 p-4">
-          <ScreenHeader
-            action={
-              <Text size="sm" muted>
-                Stopped
-              </Text>
-            }
-          />
+          <ConnectionBanner />
         </View>
         <View className="flex-1 items-center justify-center px-8" style={{ paddingBottom: TAB_CLEARANCE }}>
           <View className="w-full items-center gap-5">
-            <Text size="xl" weight="bold" className="text-center">
-              Grid Bot
+            <LogoMark size={160} />
+            <Text
+              size="2xl"
+              weight="bold"
+              style={{ fontFamily: Fonts.rounded }}
+              className="text-center uppercase tracking-widest">
+              XAU/USD Momentum Bot
             </Text>
-            <Button size="lg" fullWidth disabled={!canArm} onPress={() => setSheetOpen(true)}>
+            <Button size="lg" fullWidth disabled={!canArm || starting} loading={starting} onPress={() => setSheetOpen(true)}>
               Start bot
             </Button>
           </View>
           {!canArm && (
             <Text size="sm" muted className="mt-3 text-center">
-              Connect your cTrader account to arm the bot
+              {gateMessage}
             </Text>
           )}
         </View>
         <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
           <Dialog.Content>
-            <Dialog.Title>Auto lots</Dialog.Title>
+            <Dialog.Title>Start Strategy</Dialog.Title>
             <Dialog.Description>
-              {`Lots scale from equity ($${equity.toFixed(2)}): 0.01 per $500, capped at ${STRATEGY_RULES.maxLotsPerLevel.toFixed(2)}. This arm: ${autoLots.toFixed(2)} lots/leg · up to 7 legs/book · XAUUSD M30 · DCA.`}
+              {`XAU/USD 1m Momentum Strategy · Fixed TP $2.00 target.\n~${autoLots.toFixed(2)} lots from $${equity.toFixed(2)} equity.`}
+              {weekend ? ' Weekend: rests at open.' : ''}
             </Dialog.Description>
             {startError ? (
               <Text size="sm" className="text-destructive">
@@ -155,17 +187,19 @@ export default function BotScreen() {
                 <Button variant="outline">Cancel</Button>
               </Dialog.Close>
               <Button disabled={!canArm || starting} loading={starting} onPress={confirmStart}>
-                Arm DCA
+                Arm Strategy
               </Button>
             </Dialog.Footer>
           </Dialog.Content>
         </Dialog>
       </View>
+      </ScreenErrorBoundary>
     );
   }
 
   // Running: orb + live status + event logs + stop.
   return (
+    <ScreenErrorBoundary key={live.status}>
     <View className="flex-1 bg-background">
       <ChartBackdrop />
       <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: TAB_CLEARANCE, flexGrow: 1 }}>
@@ -180,6 +214,7 @@ export default function BotScreen() {
             </View>
           }
         />
+        <ConnectionBanner />
         <View className="flex-row items-center justify-between px-2 py-1">
           <View className="flex-1 items-start gap-1">
             <Text size="sm" muted className="uppercase tracking-widest">
@@ -206,45 +241,98 @@ export default function BotScreen() {
           </Text>
         )}
         <View className="flex-row flex-wrap gap-3">
-          <StatTile label="Open" value={`${status.openManaged}/20`} />
-          <StatTile label="Resting" value={String(status.restingCount)} />
-          <StatTile label="Lots / lvl" value={status.volumeLots.toFixed(2)} />
-          <StatTile label="Step" value={status.step !== null ? status.step.toFixed(2) : '—'} />
+          <StatTile
+            label="Position"
+            value={status.position ? `${status.position.side.toUpperCase()} ${status.position.lots}L` : 'FLAT'}
+          />
+          <StatTile
+            label="5m EMA"
+            value={status.indicators.ema5m !== null && Number.isFinite(status.indicators.ema5m) ? status.indicators.ema5m.toFixed(2) : '—'}
+          />
+          <StatTile
+            label="ADX (14)"
+            value={status.indicators.adx !== null && Number.isFinite(status.indicators.adx) ? status.indicators.adx.toFixed(1) : '—'}
+          />
+          <StatTile
+            label="VDC (20)"
+            value={
+              status.indicators.vdc !== null && Number.isFinite(status.indicators.vdc)
+                ? `${status.indicators.vdc > 0 ? '+' : ''}${status.indicators.vdc.toFixed(1)}%`
+                : '—'
+            }
+          />
         </View>
-        <Button variant="destructive" fullWidth onPress={stop}>
-          Stop bot
-        </Button>
-        <View className="gap-2">
-          {status.logs.slice(0, 3).map((entry, i) => (
-            <Card key={`${entry.time}-${i}`}>
-              <GlassSheen />
-              <Card.Content className="gap-2 p-4">
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center gap-2">
-                    <View
-                      className={`h-2 w-2 rounded-full ${
-                        entry.kind === 'fill' || entry.kind === 'close'
-                          ? 'bg-success'
-                          : entry.kind === 'escape' || entry.kind === 'error'
-                            ? 'bg-destructive'
-                            : 'bg-foreground'
+
+        {status.logs.length > 0 && (
+          <Card>
+            <GlassSheen />
+            <Card.Content className="gap-2 p-3">
+              <Text size="xs" muted className="uppercase tracking-widest font-semibold">
+                Strategy Activity
+              </Text>
+              <View className="gap-1.5">
+                {status.logs.slice(-5).reverse().map((entry, idx) => (
+                  <View key={idx} className="flex-row items-center justify-between gap-2">
+                    <Text size="xs" muted className="font-mono">
+                      {entry.time}
+                    </Text>
+                    <Text
+                      size="xs"
+                      className={`flex-1 font-mono ${
+                        entry.kind === 'signal'
+                          ? 'text-primary'
+                          : entry.kind === 'fill'
+                            ? 'text-success'
+                            : entry.kind === 'close'
+                              ? 'text-warning'
+                              : entry.kind === 'error'
+                                ? 'text-destructive'
+                                : ''
                       }`}
-                    />
-                    <Text size="xs" weight="bold" className="uppercase tracking-widest">
-                      {entry.kind}
+                      numberOfLines={1}>
+                      {entry.message}
                     </Text>
                   </View>
-                  <Text size="xs" muted className="font-mono">
-                    {entry.time}
-                  </Text>
-                </View>
-                <Text>{entry.message}</Text>
-              </Card.Content>
-            </Card>
-          ))}
-        </View>
+                ))}
+              </View>
+            </Card.Content>
+          </Card>
+        )}
+
+        <Button variant="destructive" fullWidth disabled={stopping} loading={stopping} onPress={() => setConfirmStop(true)}>
+          Stop bot
+        </Button>
+        {stopError ? (
+          <Text size="sm" className="text-center text-destructive">
+            {stopError}
+          </Text>
+        ) : null}
+        <Dialog open={confirmStop} onOpenChange={setConfirmStop}>
+          <Dialog.Content>
+            <Dialog.Title>Stop bot?</Dialog.Title>
+            <Dialog.Description>
+              {status.openManaged
+                ? 'Close the open managed trade and stop the bot? Manual trades stay.'
+                : 'Stop the strategy bot?'}
+            </Dialog.Description>
+            {weekend ? (
+              <Text size="sm" muted>
+                Weekend — market closed, confirms resume at open.
+              </Text>
+            ) : null}
+            <Dialog.Footer>
+              <Dialog.Close>
+                <Button variant="outline">Keep running</Button>
+              </Dialog.Close>
+              <Button variant="destructive" disabled={stopping} loading={stopping} onPress={() => void stop()}>
+                Stop bot
+              </Button>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog>
       </View>
     </ScrollView>
     </View>
+    </ScreenErrorBoundary>
   );
 }

@@ -1,0 +1,122 @@
+[
+  {
+    "name": "BASE (winner)",
+    "worstFold": 16.1,
+    "greenFolds": 3,
+    "testRet": 19.7
+  },
+  {
+    "name": "mult=1.6",
+    "worstFold": -15.5,
+    "greenFolds": 2,
+    "testRet": -28.5
+  },
+  {
+    "name": "mult=1.8",
+    "worstFold": -14,
+    "greenFolds": 2,
+    "testRet": 8.8
+  },
+  {
+    "name": "mult=2.2",
+    "worstFold": -21.6,
+    "greenFolds": 2,
+    "testRet": 41.5
+  },
+  {
+    "name": "mult=2.4",
+    "worstFold": -14.1,
+    "greenFolds": 2,
+    "testRet": 20.7
+  },
+  {
+    "name": "levels=8",
+    "worstFold": 16.1,
+    "greenFolds": 3,
+    "testRet": 19.7
+  },
+  {
+    "name": "levels=12",
+    "worstFold": 16.1,
+    "greenFolds": 3,
+    "testRet": 19.7
+  },
+  {
+    "name": "levels=14",
+    "worstFold": 16.1,
+    "greenFolds": 3,
+    "testRet": 19.7
+  },
+  {
+    "name": "adds=4",
+    "worstFold": -14.2,
+    "greenFolds": 2,
+    "testRet": -19.9
+  },
+  {
+    "name": "adds=5",
+    "worstFold": 5,
+    "greenFolds": 3,
+    "testRet": 3.3
+  },
+  {
+    "name": "adds=7",
+    "worstFold": -1.4,
+    "greenFolds": 2,
+    "testRet": 9.3
+  },
+  {
+    "name": "adds=8",
+    "worstFold": 32,
+    "greenFolds": 3,
+    "testRet": 46
+  },
+  {
+    "name": "basket=0.3",
+    "worstFold": -12.1,
+    "greenFolds": 1,
+    "testRet": 0.1
+  },
+  {
+    "name": "basket=0.4",
+    "worstFold": -3.9,
+    "greenFolds": 2,
+    "testRet": 4.8
+  },
+  {
+    "name": "basket=0.6",
+    "worstFold": -13.3,
+    "greenFolds": 2,
+    "testRet": 12.9
+  },
+  {
+    "name": "basket=0.7",
+    "worstFold": -8.8,
+    "greenFolds": 2,
+    "testRet": 20.7
+  },
+  {
+    "name": "stackLegs=3",
+    "worstFold": 15.7,
+    "greenFolds": 3,
+    "testRet": 25
+  },
+  {
+    "name": "stackLegs=4",
+    "worstFold": 15.8,
+    "greenFolds": 3,
+    "testRet": 22.7
+  },
+  {
+    "name": "stackLegs=6",
+    "worstFold": 15.6,
+    "greenFolds": 3,
+    "testRet": 18.1
+  },
+  {
+    "name": "stackLegs=7",
+    "worstFold": 15.1,
+    "greenFolds": 3,
+    "testRet": 18.6
+  }
+]

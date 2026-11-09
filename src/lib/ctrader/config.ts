@@ -53,12 +53,52 @@ export function grantUrl(redirectUri: string): string {
 }
 
 const TOKEN_URL = 'https://openapi.ctrader.com/apps/token';
+const TOKEN_TIMEOUT_MS = 15000;
+
+/**
+ * Same-origin proxy used by the web build. Point this at a separately hosted
+ * token proxy when the front end is deployed as a static site (for example a
+ * Vercel/Cloudflare Function that implements the same POST contract).
+ */
+const TOKEN_PROXY_URL = process.env.EXPO_PUBLIC_CTRADER_TOKEN_PROXY_URL?.trim() || null;
+/**
+ * Same-origin candidates for the web token exchange. A configured URL wins
+ * outright. Otherwise the non-obvious path goes first because some privacy
+ * extensions and corporate proxies block URLs containing "token".
+ */
+const TOKEN_PROXY_URLS = TOKEN_PROXY_URL ? [TOKEN_PROXY_URL] : ['/api/ctrader/token', '/api/token'];
+
+/** Network-level failure only — usable to decide whether another route is worth trying. */
+class TokenTransportError extends Error {}
+
+/** Manual timeout (no AbortSignal.timeout — older Hermes lacks it). */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new TokenTransportError(`Token request timed out (${TOKEN_TIMEOUT_MS}ms)`);
+    }
+    throw new TokenTransportError(err instanceof Error ? err.message : 'Network request failed');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Web always uses the token proxy (Spotware has no CORS headers). Native talks
+ * to Spotware directly unless an absolute proxy URL is configured, which is
+ * useful on networks that block the token endpoint.
+ */
+function shouldUseTokenProxy(): boolean {
+  return Platform.OS === 'web' || TOKEN_PROXY_URL !== null;
+}
 
 /** GET per the code-exchange doc; POST per the refresh doc (params in query). */
 export async function exchangeCode(code: string, redirectUri: string): Promise<TokenResponse> {
-  // Web goes through the same-origin /api/token proxy: the Spotware endpoint
-  // has no CORS headers, so browsers block direct calls (native is unaffected).
-  if (Platform.OS === 'web') {
+  if (shouldUseTokenProxy()) {
     return proxyTokens({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
   }
   const params = new URLSearchParams({
@@ -68,14 +108,14 @@ export async function exchangeCode(code: string, redirectUri: string): Promise<T
     client_id: CTRADER_CLIENT_ID,
     client_secret: CTRADER_CLIENT_SECRET,
   });
-  const res = await fetch(`${TOKEN_URL}?${params.toString()}`, {
+  const res = await fetchWithTimeout(`${TOKEN_URL}?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   });
   return parseTokenResponse(res);
 }
 
 export async function refreshTokens(refreshToken: string): Promise<TokenResponse> {
-  if (Platform.OS === 'web') {
+  if (shouldUseTokenProxy()) {
     return proxyTokens({ grant_type: 'refresh_token', refresh_token: refreshToken });
   }
   const params = new URLSearchParams({
@@ -84,7 +124,7 @@ export async function refreshTokens(refreshToken: string): Promise<TokenResponse
     client_id: CTRADER_CLIENT_ID,
     client_secret: CTRADER_CLIENT_SECRET,
   });
-  const res = await fetch(`${TOKEN_URL}?${params.toString()}`, {
+  const res = await fetchWithTimeout(`${TOKEN_URL}?${params.toString()}`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
   });
@@ -92,12 +132,45 @@ export async function refreshTokens(refreshToken: string): Promise<TokenResponse
 }
 
 async function proxyTokens(body: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch('/api/token', {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return parseTokenResponse(res);
+  let lastError: unknown = null;
+  for (const url of TOKEN_PROXY_URLS) {
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      // Transport failure (blocked path, offline server): try the next route.
+      lastError = err;
+      continue;
+    }
+
+    // A missing route (old deployment) or an HTML SPA fallback means this path
+    // is not the token proxy. Try the next one; never re-send a code after a
+    // real JSON response, because that exchange may already have consumed it.
+    if (res.status === 404 || res.status === 405) {
+      lastError = new Error(`${url} returned ${res.status}`);
+      continue;
+    }
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/json')) {
+      lastError = new Error(`${url} did not return JSON`);
+      continue;
+    }
+    return parseTokenResponse(res);
+  }
+
+  // Every route failed at the network layer. "Failed to fetch" alone is
+  // unactionable, so name the endpoints and the likely cause.
+  throw new Error(
+    `Could not reach the token server (${TOKEN_PROXY_URLS.join(', ')}). ` +
+      'On web, serve the build with API routes (web.output "server") or set ' +
+      'EXPO_PUBLIC_CTRADER_TOKEN_PROXY_URL to a hosted token proxy. On a device, ' +
+      'that override must be an absolute https URL reachable from the phone. ' +
+      (lastError instanceof Error ? `(${lastError.message})` : ''),
+  );
 }
 
 export interface TokenResponse {
@@ -108,7 +181,7 @@ export interface TokenResponse {
 }
 
 async function parseTokenResponse(res: Response): Promise<TokenResponse> {
-  const body = (await res.json()) as {
+  let body: {
     accessToken?: string;
     tokenType?: string;
     expiresIn?: number;
@@ -116,41 +189,63 @@ async function parseTokenResponse(res: Response): Promise<TokenResponse> {
     errorCode?: string | null;
     description?: string | null;
   };
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    // Non-JSON error pages (502 HTML, empty body) must keep the HTTP status.
+    throw new Error(`Token request failed (${res.status})`);
+  }
   if (!res.ok || body.errorCode || !body.accessToken || !body.refreshToken) {
+    // Authorization codes are single-use: a network drop after the upstream
+    // exchange consumes the code, so retrying the same pasted link always
+    // fails. Tell the user to request a fresh one instead of a vague error.
+    if (body.errorCode === 'ACCESS_DENIED') {
+      throw new Error(
+        'Authorization link was already used or expired. Tap “Connect with cTrader” again and paste the new redirect link.',
+      );
+    }
     throw new Error(body.description ?? body.errorCode ?? `Token request failed (${res.status})`);
   }
+  const expiresIn = Number(body.expiresIn ?? 2628000);
   return {
     accessToken: body.accessToken,
     tokenType: body.tokenType ?? 'bearer',
-    expiresIn: body.expiresIn ?? 2628000,
+    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 2628000,
     refreshToken: body.refreshToken,
   };
 }
 
-/** Portal only accepts https:// — go through the Expo auth proxy (samuwayo).
- *  Currently used as the native return target until universal links exist. */
-const PROXY_URI = 'https://auth.expo.io/@samuwayo/null';
+/**
+ * Optional HTTPS bridge that forwards the authorization result back to the
+ * app (for example a tiny hosted page that deep-links `xliquid://oauth`, or a
+ * web origin that completes the postMessage flow). It must be registered in
+ * the cTrader Open API portal AND handled by the app.
+ */
+const REDIRECT_OVERRIDE = process.env.EXPO_PUBLIC_CTRADER_REDIRECT_URI?.trim() || null;
 
 /**
- * Where Spotware redirects with ?code=.
- * Override with EXPO_PUBLIC_CTRADER_REDIRECT_URI (e.g. production web origin).
- * Web: an already-registered portal URI — after Allow access the user copies
- * that URL and pastes it into the app (manual flow, no popup tricks needed).
- * Native: the Expo proxy (portal-registered); the proxy forwards to the app.
+ * Portal-registered fallback. After "Allow access", Spotware redirects here
+ * with `?code=…`; the user copies that link and pastes it into the app. This
+ * works on web and native without any extra hosting.
  */
 export const MANUAL_REDIRECT_URI = 'https://openapi.ctrader.com';
 
+/**
+ * True when no automatic return bridge is configured, so the login screen
+ * must show the "paste the redirect link" field up front. The old Expo auth
+ * proxy (auth.expo.io) is deprecated and no longer completes sign-in, so
+ * native defaults to the manual flow instead of pretending it will return.
+ */
+export const NEEDS_MANUAL_LINK = REDIRECT_OVERRIDE === null;
+
+/** Where Spotware redirects with `?code=`. */
 export function redirectUri(): string {
-  return (
-    process.env.EXPO_PUBLIC_CTRADER_REDIRECT_URI ??
-    (Platform.OS === 'web' ? MANUAL_REDIRECT_URI : PROXY_URI)
-  );
+  return REDIRECT_OVERRIDE ?? MANUAL_REDIRECT_URI;
 }
 
 /**
- * Where THIS app listens for the redirect back.
- * Web: the proxy URL itself (postMessage flow). Native: the custom scheme
- * (the proxy forwards there; needs the EAS-linked project for scheme lookup).
+ * Where THIS app listens for the redirect back. Only meaningful when a
+ * working bridge is configured; otherwise the manual link flow is used.
  */
 export function returnUrl(): string {
   return Platform.OS === 'web' ? redirectUri() : 'xliquid://oauth';

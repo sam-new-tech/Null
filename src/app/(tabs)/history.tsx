@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 
 import { LiveBadge, ScreenHeader } from '@/components/screen-header';
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
+import { ConnectionBanner } from '@/components/connection-banner';
+import { ScreenErrorBoundary } from '@/components/screen-error-boundary';
 import { TAB_CLEARANCE } from '@/constants/tabs';
-import { formatMoney } from '@/hooks/use-mock-account';
+import { formatLots, formatMoney } from '@/hooks/use-mock-account';
 import { useTrading } from '@/lib/trading/useTrading';
 import { liveEngine } from '@/lib/ctrader/live';
 import { Button } from 'panelui-native/components/button';
@@ -14,15 +16,57 @@ import { Text } from 'panelui-native/primitives/text';
 
 const PAGE_SIZE = 7;
 
+const HistoryRow = memo(function HistoryRow({
+  t,
+}: {
+  t: { id: number; symbol: string; side: 'buy' | 'sell'; volume: number; pl: number; time: string };
+}) {
+  const win = t.pl >= 0;
+  return (
+    <Card>
+      <GlassSheen />
+      <Card.Content className="gap-1 px-5 py-3">
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center gap-2">
+            <Text
+              size="xs"
+              weight="bold"
+              className={t.side === 'buy' ? 'text-success' : 'text-destructive'}>
+              {t.side === 'buy' ? 'BUY' : 'SELL'}
+            </Text>
+            <Text weight="medium">{t.symbol}</Text>
+            <Text size="sm" muted>
+              {formatLots(t.volume)}
+            </Text>
+          </View>
+          <Text
+            weight="semibold"
+            className={`font-mono ${win ? 'text-success' : 'text-destructive'}`}>
+            {formatMoney(t.pl)}
+          </Text>
+        </View>
+        <Text size="xs" muted className="font-mono">
+          {t.time} · closed
+        </Text>
+      </Card.Content>
+    </Card>
+  );
+});
+
 export default function HistoryScreen() {
   const { history, live } = useTrading();
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const onRefresh = async () => {
+    if (refreshing) return;
     setRefreshing(true);
+    setRefreshError(null);
     try {
       await liveEngine.refresh();
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -36,6 +80,7 @@ export default function HistoryScreen() {
   const up = total >= 0;
 
   return (
+    <ScreenErrorBoundary key={live ? 'live' : 'demo'}>
     <View className="flex-1 bg-background">
       <ChartBackdrop />
       <ScrollView
@@ -44,6 +89,12 @@ export default function HistoryScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
         <View className="gap-4 p-4">
           <ScreenHeader title="History" />
+          <ConnectionBanner />
+          {refreshError ? (
+            <Text size="sm" className="text-center text-destructive">
+              {refreshError}
+            </Text>
+          ) : null}
           <LiveBadge live={live} />
           {history.length === 0 ? (
             <Card className="rounded-full">
@@ -54,38 +105,9 @@ export default function HistoryScreen() {
             </Card>
           ) : (
           <View className="gap-2">
-            {visible.map((t) => {
-              const win = t.pl >= 0;
-              return (
-                <Card key={t.id}>
-                  <GlassSheen />
-                  <Card.Content className="gap-1 px-5 py-3">
-                    <View className="flex-row items-center justify-between">
-                      <View className="flex-row items-center gap-2">
-                        <Text
-                          size="xs"
-                          weight="bold"
-                          className={t.side === 'buy' ? 'text-success' : 'text-destructive'}>
-                          {t.side === 'buy' ? 'BUY' : 'SELL'}
-                        </Text>
-                        <Text weight="medium">{t.symbol}</Text>
-                        <Text size="sm" muted>
-                          {t.volume.toFixed(2)}
-                        </Text>
-                      </View>
-                      <Text
-                        weight="semibold"
-                        className={`font-mono ${win ? 'text-success' : 'text-destructive'}`}>
-                        {formatMoney(t.pl)}
-                      </Text>
-                    </View>
-                    <Text size="xs" muted className="font-mono">
-                      {t.time} · closed
-                    </Text>
-                  </Card.Content>
-                </Card>
-                );
-              })}
+            {visible.map((t) => (
+              <HistoryRow key={t.id} t={t} />
+            ))}
           </View>
         )}
         {history.length > 0 && (
@@ -125,5 +147,6 @@ export default function HistoryScreen() {
       </View>
     </ScrollView>
     </View>
+    </ScreenErrorBoundary>
   );
 }

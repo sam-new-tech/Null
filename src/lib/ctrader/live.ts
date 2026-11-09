@@ -7,7 +7,7 @@ import {
   socketUrl,
 } from './config';
 import { Payload } from './protocol';
-import { isFilledStatus, isOpenPositionStatus, isRestingOrderStatus } from './orders';
+import { asSide, isFilledStatus, isOpenPositionStatus, isRestingOrderStatus } from './orders';
 import type {
   AccountInfo,
   DealInfo,
@@ -20,6 +20,9 @@ import { loadSession, saveSession, type CTraderSession } from './session';
 import { storeGet, storeSet } from '../storage';
 
 const SYMBOLS_CACHE_KEY = 'ctrader.symbols.v1';
+
+/** Monotonic suffix so burst closes in the same millisecond get unique ids. */
+let optimisticSeq = 0;
 
 export interface LiveSnapshot {
   status: 'idle' | 'connecting' | 'ready' | 'error';
@@ -55,6 +58,29 @@ function money(value: number | undefined, digits: number | undefined): number {
 }
 
 /**
+ * Spot quotes arrive as 1e5-scaled ints (e.g. XAUUSD ~414613000 for 4146.13).
+ * Pre-flattened doubles pass through untouched. Integer check keeps both
+ * forms realtime-safe without per-symbol config.
+ */
+export function scaleSpot(raw: unknown): number | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return Number.isInteger(raw) ? raw / 100000 : raw;
+}
+
+/** Defensive array: some gateways return a single object, not an array. */
+function asArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value !== undefined && value !== null) return [value as T];
+  return [];
+}
+
+/** Seconds since the last inbound frame — drives stale-stream UI. */
+export function secondsSinceMessage(lastMessageAt: number, now = Date.now()): number {
+  if (!lastMessageAt) return Number.POSITIVE_INFINITY;
+  return Math.max(0, (now - lastMessageAt) / 1000);
+}
+
+/**
  * Live cTrader data engine (JSON over WebSocket, all platforms).
  * Owns one connection per environment; screens read via useLive().
  */
@@ -63,10 +89,14 @@ class LiveEngine {
   private snapshot: LiveSnapshot = EMPTY;
   private listeners = new Set<() => void>();
   private spots = new Map<number, { bid: number; ask: number }>();
-  private lightTimer: ReturnType<typeof setInterval> | null = null;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private session: CTraderSession | null = null;
   private starting = false;
+  private watchUnsub: (() => void) | null = null;
+  /** Bumped on every stop(): in-flight start/snapshot work from a previous
+   *  generation must never emit into the fresh snapshot. */
+  private epoch = 0;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -79,11 +109,23 @@ class LiveEngine {
 
   private emit(partial: Partial<LiveSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...partial, version: this.snapshot.version + 1 };
-    this.listeners.forEach((listener) => listener());
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // One bad subscriber must not break the realtime loop.
+      }
+    });
   }
 
   get connected(): boolean {
     return this.snapshot.status === 'ready';
+  }
+
+  /** True only when the socket can actually send right now. Snapshot
+   *  `connected` stays true across reconnect gaps — this does not. */
+  isOpen(): boolean {
+    return this.client.isOpen;
   }
 
   /** Low-level passthroughs so the bot runner shares this single connection. */
@@ -107,7 +149,7 @@ class LiveEngine {
   static async prepareConnection(
     client: CTraderClient,
     session: CTraderSession,
-  ): Promise<{ session: CTraderSession; accountId: number }> {
+  ): Promise<{ session: CTraderSession; accountId: number; account: AccountInfo }> {
     let active = session;
     if (active.expiresAt < Date.now() + 60000) {
       const tokens = await refreshTokens(active.refreshToken);
@@ -129,7 +171,7 @@ class LiveEngine {
     const accounts = await client.request(Payload.GetAccountsByAccessTokenReq, {
       accessToken: active.accessToken,
     });
-    const list = (accounts.ctidTraderAccount as AccountInfo[] | undefined) ?? [];
+    const list = asArray<AccountInfo>(accounts.ctidTraderAccount);
     const match =
       list.find((a) => a.ctidTraderAccountId === active.ctidTraderAccountId) ?? list[0];
     if (!match) throw new Error('No trading account granted access');
@@ -140,66 +182,122 @@ class LiveEngine {
       ctidTraderAccountId: accountId,
       accessToken: active.accessToken,
     });
-    return { session: authed, accountId };
+    return { session: authed, accountId, account: match };
   }
 
   private static waitOpen(client: CTraderClient): Promise<void> {
-    if (client.state === 'open') return Promise.resolve();
+    if (client.isOpen) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Connection timed out')), 20000);
-      client.onStateChange = (state) => {
-        if (state === 'open') {
+      const timer = setTimeout(() => {
+        off();
+        reject(new Error('Connection timed out'));
+      }, 20000);
+      const off = client.onState((state) => {
+        // Abort fast on explicit close (stop()/logout) instead of the 20s hang.
+        if (state === 'open' || state === 'closed') {
           clearTimeout(timer);
-          client.onStateChange = null;
-          resolve();
+          off();
+          if (state === 'open') resolve();
+          else reject(new Error('Connection closed'));
         }
-      };
+      });
     });
   }
 
   /** Full login sequence: tokens → socket → app auth → account auth → snapshot. */
   async start(session: CTraderSession): Promise<void> {
     if (this.starting) return;
+    if (this.snapshot.status === 'ready' && this.session?.accessToken === session.accessToken) return;
     this.starting = true;
+    const epoch = this.epoch;
     this.emit({ status: 'connecting', error: null });
     try {
-      const { session: active, accountId } = await LiveEngine.prepareConnection(
+      const { session: active, accountId, account } = await LiveEngine.prepareConnection(
         this.client,
         session,
       );
+      if (epoch !== this.epoch) return; // stopped mid-handshake — stay stopped
       this.session = active;
-      const accounts = await this.request(Payload.GetAccountsByAccessTokenReq, {
-        accessToken: active.accessToken,
-      });
-      const match = ((accounts.ctidTraderAccount as AccountInfo[] | undefined) ?? []).find(
-        (a) => a.ctidTraderAccountId === accountId,
-      );
       this.attachEvents(accountId);
       await this.snapshotAll(accountId, true);
+      if (epoch !== this.epoch) return;
       this.watchConnection();
-      this.emit({ status: 'ready', account: match ?? null });
-      this.startLightRefresh();
+      this.scheduleTokenRefresh();
+      // snapshotAll never throws (warn-only) — verify we actually authed.
+      if (!this.session) throw new Error('Connection failed');
+      this.emit({ status: 'ready', account });
       this.startWatchdog();
     } catch (err) {
+      if (epoch !== this.epoch) return; // a newer stop() owns the state now
+      const message = err instanceof Error ? err.message : 'Connection failed';
       this.emit({
         status: 'error',
-        error: err instanceof Error ? err.message : 'Connection failed',
+        error: message,
       });
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       this.starting = false;
     }
   }
 
   stop(): void {
-    this.stopLightRefresh();
+    this.epoch++; // orphan every in-flight start/snapshot from the old life
+    this.stopTokenRefresh();
     this.stopWatchdog();
-    this.client.onStateChange = null;
+    if (this.watchUnsub) this.watchUnsub();
+    this.watchUnsub = null;
+    this.eventUnsubs.forEach((off) => off());
+    this.eventUnsubs = [];
     this.client.close();
     this.session = null;
     this.spots.clear();
     this.symbolsWarned = false;
+    this.snapshotQueued = false;
+    if (this.snapshotTrailing) clearTimeout(this.snapshotTrailing);
+    this.snapshotTrailing = null;
     this.snapshot = EMPTY;
-    this.listeners.forEach((listener) => listener());
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // Ignore — teardown must not throw.
+      }
+    });
+  }
+
+  /** Proactive token refresh 5 min before expiry — keeps a long session realtime. */
+  private scheduleTokenRefresh(): void {
+    this.stopTokenRefresh();
+    const session = this.session;
+    if (!session) return;
+    const delay = session.expiresAt - Date.now() - 300000;
+    if (!Number.isFinite(delay) || delay <= 0) return;
+    this.tokenRefreshTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const current = this.session;
+          if (!current) return;
+          const tokens = await refreshTokens(current.refreshToken);
+          const next = {
+            ...current,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: Date.now() + tokens.expiresIn * 1000,
+          };
+          await saveSession(next);
+          this.session = next;
+          this.scheduleTokenRefresh();
+        } catch {
+          // Next reconnect retries; stream stays usable until expiry.
+          this.scheduleTokenRefresh();
+        }
+      })();
+    }, Math.min(delay, 2147483647));
+  }
+
+  private stopTokenRefresh(): void {
+    if (this.tokenRefreshTimer) clearTimeout(this.tokenRefreshTimer);
+    this.tokenRefreshTimer = null;
   }
 
   async refresh(): Promise<void> {
@@ -233,21 +331,19 @@ class LiveEngine {
         if (trader) this.emit({ trader });
       }),
     );
-    // Spots stream into a map; P/L re-renders at most every 500ms (no per-tick setState storm).
+    // Spots stream into a map; P/L re-renders at most every 250ms (no per-tick storm).
+    // Tick-critical consumers (bot) subscribe to the raw SpotEvent directly.
     this.eventUnsubs.push(
       this.client.on(Payload.SpotEvent, (payload) => {
         const symbolId = payload.symbolId as number;
-        const bid = payload.bid as number | undefined;
-        const ask = payload.ask as number | undefined;
-        if (symbolId !== undefined && (bid !== undefined || ask !== undefined)) {
-          this.spots.set(symbolId, {
-            bid: (bid ?? ask ?? 0) / 100000,
-            ask: (ask ?? bid ?? 0) / 100000,
-          });
-          if (Date.now() - this.lastSpotEmit > 500) {
-            this.lastSpotEmit = Date.now();
-            this.emit({});
-          }
+        if (symbolId === undefined) return;
+        const bid = scaleSpot(payload.bid ?? payload.ask);
+        const ask = scaleSpot(payload.ask ?? payload.bid);
+        if (bid === null || ask === null || bid <= 0 || ask <= 0) return;
+        this.spots.set(symbolId, { bid, ask });
+        if (Date.now() - this.lastSpotEmit > 250) {
+          this.lastSpotEmit = Date.now();
+          this.emit({});
         }
       }),
     );
@@ -272,7 +368,7 @@ class LiveEngine {
       this.snapshot.orders = this.snapshot.orders.filter((o) => Number(o.orderId) !== Number(order.orderId));
       changed = true;
       const symbolId = Number(order.tradeData?.symbolId ?? NaN);
-      const side = order.tradeData?.tradeSide === 2 || order.tradeData?.tradeSide === 'SELL' ? 2 : 1;
+      const side = asSide(order.tradeData?.tradeSide) === 'sell' ? 2 : 1;
       const volume = Number(order.tradeData?.volume ?? deal?.volume ?? NaN);
       if (
         pid !== undefined &&
@@ -310,7 +406,7 @@ class LiveEngine {
       // Optimistic history row until DealListReq reconciles (≤5s later).
       const symbolId = Number(order?.tradeData?.symbolId ?? NaN);
       const volume = Number(order?.tradeData?.volume ?? deal?.volume ?? NaN);
-      const side = order?.tradeData?.tradeSide === 2 || order?.tradeData?.tradeSide === 'SELL' ? 2 : 1;
+      const side = asSide(order?.tradeData?.tradeSide) === 'sell' ? 2 : 1;
       if (
         Number.isFinite(symbolId) &&
         Number.isFinite(volume) &&
@@ -318,7 +414,7 @@ class LiveEngine {
       ) {
         this.snapshot.deals = [
           {
-            dealId: Date.now(),
+            dealId: Date.now() * 1000 + (optimisticSeq = (optimisticSeq + 1) % 1000),
             positionId: Number(pid),
             volume,
             symbolId,
@@ -391,14 +487,22 @@ class LiveEngine {
   private lastSnapshotAt = 0;
   private lastDealsAt = 0;
   private lastSpotEmit = 0;
+  private snapshotQueued = false;
+  private snapshotTrailing: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * The socket auto-reconnects on drops, but the server forgets auth +
    * spot subscriptions. Re-auth and resubscribe whenever it re-opens.
+   * Multi-listener safe: never clobbers other state subscribers.
    */
   private watchConnection(): void {
-    this.client.onStateChange = (state) => {
-      if (state !== 'open') return;
+    if (this.watchUnsub) return;
+    this.watchUnsub = this.client.onState((state) => {
+      if (state !== 'open') {
+        // Surface disconnects instantly so Live badges go stale in realtime.
+        if (this.snapshot.status === 'ready') this.emit({});
+        return;
+      }
       if (!this.session || this.snapshot.status !== 'ready' || this.reauthing) return;
       this.reauthing = true;
       void (async () => {
@@ -414,6 +518,7 @@ class LiveEngine {
             };
             await saveSession(active);
             this.session = active;
+            this.scheduleTokenRefresh();
           }
           await this.request(Payload.ApplicationAuthReq, {
             clientId: CTRADER_CLIENT_ID,
@@ -431,12 +536,23 @@ class LiveEngine {
           this.reauthing = false;
         }
       })();
-    };
+    });
   }
 
   private async snapshotAll(accountId: number, force = false): Promise<void> {
-    // Debounce event-driven refreshes: bursts of fills must not storm the server.
-    if (!force && Date.now() - this.lastSnapshotAt < 5000) return;
+    // Trailing debounce: bursts queue one follow-up instead of dropping truth.
+    if (!force && Date.now() - this.lastSnapshotAt < 5000) {
+      if (!this.snapshotQueued) {
+        this.snapshotQueued = true;
+        const wait = Math.max(0, 5000 - (Date.now() - this.lastSnapshotAt));
+        this.snapshotTrailing = setTimeout(() => {
+          this.snapshotQueued = false;
+          this.snapshotTrailing = null;
+          void this.snapshotAll(accountId, true);
+        }, wait);
+      }
+      return;
+    }
     this.lastSnapshotAt = Date.now();
     try {
       // Symbols barely change: fetch once per connection. Deals refresh at
@@ -458,7 +574,7 @@ class LiveEngine {
         : Promise.resolve(null),
     ]);
 
-    const symbols = needSymbols || force ? new Map<number, SymbolInfo>() : this.snapshot.symbols;
+    const symbols = needSymbols ? new Map<number, SymbolInfo>(this.snapshot.symbols) : this.snapshot.symbols;
     if (symbols.size === 0) await this.loadSymbolsCache(symbols);
     const resRecord = (symbolsRes ?? {}) as Record<string, unknown>;
     const rawList =
@@ -476,11 +592,11 @@ class LiveEngine {
       if (s.symbolName) symbols.set(s.symbolId, { symbolId: s.symbolId, symbolName: normalizeSymbolName(s.symbolName), digits: typeof s.digits === 'number' ? s.digits : 2 });
     });
 
-    const positions = ((reconcileRes.position ?? []) as PositionInfo[]).filter((p) =>
-      isOpenPositionStatus(p.positionStatus),
+    const positions = asArray<PositionInfo>(reconcileRes.position).filter(
+      (p) => p.tradeData !== undefined && Number.isFinite(p.tradeData.symbolId) && isOpenPositionStatus(p.positionStatus),
     );
-    const orders = ((reconcileRes.order ?? []) as OrderInfo[]).filter((o) =>
-      isRestingOrderStatus(o.orderStatus),
+    const orders = asArray<OrderInfo>(reconcileRes.order).filter(
+      (o) => o.tradeData !== undefined && Number.isFinite(o.tradeData.symbolId) && isRestingOrderStatus(o.orderStatus),
     );
 
     // Fallback: SymbolsList answers empty on some accounts — resolve the ids
@@ -498,7 +614,7 @@ class LiveEngine {
           ctidTraderAccountId: accountId,
           symbolId: [...missing],
         });
-        const list = ((byId.symbol ?? []) as { symbolId: number; symbolName?: string; digits?: number }[]);
+        const list = asArray<{ symbolId: number; symbolName?: string; digits?: number }>(byId.symbol);
         list.forEach((s) => {
           if (s.symbolName) {
             symbols.set(s.symbolId, {
@@ -515,7 +631,7 @@ class LiveEngine {
     if (symbols.size === 0) {
       if (!this.symbolsWarned) {
         this.symbolsWarned = true;
-        console.warn('[live] symbols empty, res keys:', Object.keys(resRecord));
+        if (__DEV__) console.warn('[live] symbols empty, res keys:', Object.keys(resRecord));
       }
     } else {
       this.symbolsWarned = false;
@@ -544,8 +660,8 @@ class LiveEngine {
 
     const deals = (
       needDeals
-        ? (((dealsRes?.deal ?? []) as DealInfo[])
-            .filter((deal) => deal.closePositionDetail !== undefined)
+        ? (asArray<DealInfo>(dealsRes?.deal)
+            .filter((deal) => deal.closePositionDetail != null)
             .sort((a, b) => b.executionTimestamp - a.executionTimestamp))
         : this.snapshot.deals
     );
@@ -560,26 +676,16 @@ class LiveEngine {
     });
     } catch (err) {
       // Snapshot failures (e.g. rate limiting) must never crash the stream.
-      console.warn('[live] snapshot failed:', err instanceof Error ? err.message : err);
+      if (__DEV__) console.warn('[live] snapshot failed:', err instanceof Error ? err.message : err);
     }
-  }
-
-  private startLightRefresh(): void {
-    this.stopLightRefresh();
-    this.lightTimer = setInterval(() => {
-      if (this.snapshot.status === 'ready') this.emit({});
-    }, 2000);
-  }
-
-  private stopLightRefresh(): void {
-    if (this.lightTimer) clearInterval(this.lightTimer);
-    this.lightTimer = null;
   }
 
   /**
    * Dead-stream watchdog: heartbeats go out every 10s but prove nothing.
    * When we hold subscriptions (positions, orders, or the bot's symbol) and
    * hear nothing for 35s, recycle the socket — the watcher re-auths after.
+   * No polling refresh: the stream is purely event-driven (Execution/Spot/
+   * Trader events + optimistic patches), so idle apps cost zero renders.
    */
   private startWatchdog(): void {
     this.stopWatchdog();
@@ -588,9 +694,14 @@ class LiveEngine {
       const needsStream =
         this.extraSpots.size > 0 || this.snapshot.positions.length > 0 || this.snapshot.orders.length > 0;
       if (!needsStream) return;
+      // Never recycle mid-reauth: the open socket is about to be re-authed,
+      // and recycling now would strand it open-but-unauthed for another 35s.
+      if (this.reauthing) return;
       if (Date.now() - this.client.lastMessageAt > 35000) {
-        console.warn('[live] stream silent — recycling connection');
-        this.client.close();
+        if (__DEV__) console.warn('[live] stream silent — recycling connection');
+        // recycle() keeps wantOpen: the socket re-opens and watchConnection
+        // re-auths. close() here would strand the stream forever.
+        this.client.recycle();
       }
     }, 15000);
   }
@@ -607,7 +718,10 @@ class LiveEngine {
     const quote = symbolName.slice(-3);
     if (quote === 'USD') return 1;
     const conv = this.spots.get(this.symbolIdByName(`USD${quote}`));
-    if (conv) return 1 / ((conv.bid + conv.ask) / 2);
+    if (conv) {
+      const mid = (conv.bid + conv.ask) / 2;
+      if (mid > 0) return 1 / mid;
+    }
     const direct = this.spots.get(this.symbolIdByName(`${quote}USD`));
     if (direct) return (direct.bid + direct.ask) / 2;
     return 1;
@@ -625,11 +739,32 @@ class LiveEngine {
     const spot = this.spots.get(position.tradeData.symbolId);
     const open = position.price ?? 0;
     if (!spot || !open) return 0;
-    const mid = (spot.bid + spot.ask) / 2;
-    const dir = position.tradeData.tradeSide === 1 ? 1 : -1;
+    // Side-aware close price: BUY exits at bid, SELL at ask. Mid would hide spread.
+    const isBuy = asSide(position.tradeData.tradeSide) === 'buy';
+    const close = isBuy ? spot.bid : spot.ask;
+    const dir = isBuy ? 1 : -1;
     const units = position.tradeData.volume / 100;
-    const quotePL = (mid - open) * dir * units;
+    const quotePL = (close - open) * dir * units;
     return quotePL * this.quoteToDeposit(symbol?.symbolName ?? '', true);
+  }
+
+  /** Latest spot for a symbol (realtime tick cache). */
+  getSpot(symbolId: number): { bid: number; ask: number; mid: number } | null {
+    const spot = this.spots.get(symbolId);
+    if (!spot) return null;
+    return { ...spot, mid: (spot.bid + spot.ask) / 2 };
+  }
+
+  /** Realtime health for banners: socket state + stream staleness. */
+  health(): { socket: string; staleSeconds: number; stale: boolean } {
+    const staleSeconds = secondsSinceMessage(this.client.lastMessageAt);
+    const needsStream =
+      this.extraSpots.size > 0 || this.snapshot.positions.length > 0 || this.snapshot.orders.length > 0;
+    return {
+      socket: this.client.state,
+      staleSeconds: Number.isFinite(staleSeconds) ? staleSeconds : -1,
+      stale: needsStream && staleSeconds > 35,
+    };
   }
 
   openPL(): number {

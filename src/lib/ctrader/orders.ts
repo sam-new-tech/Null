@@ -137,7 +137,23 @@ export function unitsPerLot(symbolName: string): number {
 }
 
 function lotsToVolume(volumeLots: number, unitsPerLot = 100000): number {
+  if (!Number.isFinite(volumeLots) || volumeLots <= 0) {
+    throw new Error(`Invalid lots: ${String(volumeLots)}`);
+  }
+  if (!Number.isFinite(unitsPerLot) || unitsPerLot <= 0) {
+    throw new Error(`Invalid units-per-lot: ${String(unitsPerLot)}`);
+  }
   return Math.round(volumeLots * unitsPerLot * 100);
+}
+
+function requireAccount(accountId: number): number {
+  if (!Number.isFinite(accountId) || accountId <= 0) throw new Error('Invalid account id');
+  return accountId;
+}
+
+function requireSymbol(symbolId: number): number {
+  if (!Number.isFinite(symbolId) || symbolId <= 0) throw new Error('Invalid symbol id');
+  return symbolId;
 }
 
 /** ProtoOASymbolsListReq (2114). Only field besides the account id is the
@@ -194,6 +210,11 @@ export interface LimitOrderParams {
  * applies GTC. LIMIT does not require it to be sent explicitly.
  */
 export function placeLimitOrder(accountId: number, params: LimitOrderParams): RequestPair {
+  requireAccount(accountId);
+  requireSymbol(params.symbolId);
+  if (!Number.isFinite(params.limitPrice) || params.limitPrice <= 0) {
+    throw new Error(`Invalid limit price: ${String(params.limitPrice)}`);
+  }
   const payload: Record<string, unknown> = {
     ctidTraderAccountId: accountId,
     symbolId: params.symbolId,
@@ -214,6 +235,8 @@ export function placeMarketOrder(
   accountId: number,
   params: { symbolId: number; side: 'buy' | 'sell'; volumeLots: number; label?: string; unitsPerLot?: number },
 ): RequestPair {
+  requireAccount(accountId);
+  requireSymbol(params.symbolId);
   const payload: Record<string, unknown> = {
     ctidTraderAccountId: accountId,
     symbolId: params.symbolId,
@@ -228,9 +251,12 @@ export function placeMarketOrder(
 /** ProtoOACancelOrderReq (2108). Confirm via ExecutionEvent ORDER_CANCELLED
  *  matching order.orderId (see file header). */
 export function cancelOrder(accountId: number, orderId: number | string): RequestPair {
+  requireAccount(accountId);
+  const id = Number(orderId);
+  if (!Number.isFinite(id)) throw new Error(`Invalid order id: ${String(orderId)}`);
   return {
     type: 2108,
-    payload: { ctidTraderAccountId: accountId, orderId: Number(orderId) },
+    payload: { ctidTraderAccountId: accountId, orderId: id },
   };
 }
 
@@ -245,14 +271,47 @@ export function closePosition(
   unitsPerLot = 100000,
   rawVolume?: number,
 ): RequestPair {
+  requireAccount(accountId);
+  const pid = Number(positionId);
+  if (!Number.isFinite(pid)) throw new Error(`Invalid position id: ${String(positionId)}`);
+  let volume: number;
+  if (rawVolume !== undefined) {
+    if (!Number.isFinite(rawVolume) || rawVolume <= 0) {
+      throw new Error(`Invalid position volume: ${String(rawVolume)}`);
+    }
+    volume = Math.round(rawVolume);
+  } else {
+    volume = lotsToVolume(volumeLots, unitsPerLot);
+  }
   return {
     type: 2111,
     payload: {
       ctidTraderAccountId: accountId,
-      positionId: Number(positionId),
-      volume: rawVolume !== undefined ? Math.round(rawVolume) : lotsToVolume(volumeLots, unitsPerLot),
+      positionId: pid,
+      volume,
     },
   };
+}
+
+/** ProtoOAAmendPositionSLTPReq (2110). Set broker-side takeProfit or stopLoss on an open position. */
+export function amendPositionSLTP(
+  accountId: number,
+  params: {
+    positionId: number | string;
+    takeProfit?: number;
+    stopLoss?: number;
+  },
+): RequestPair {
+  requireAccount(accountId);
+  const pid = Number(params.positionId);
+  if (!Number.isFinite(pid)) throw new Error(`Invalid position id: ${String(params.positionId)}`);
+  const payload: Record<string, unknown> = {
+    ctidTraderAccountId: accountId,
+    positionId: pid,
+  };
+  if (params.takeProfit !== undefined) payload.takeProfit = params.takeProfit;
+  if (params.stopLoss !== undefined) payload.stopLoss = params.stopLoss;
+  return { type: 2110, payload };
 }
 
 /**
@@ -272,7 +331,9 @@ export function asSide(value: unknown): 'buy' | 'sell' {
 }
 
 function statusIs(value: unknown, name: string, num: number): boolean {
-  return value === undefined || value === name || value === num || value === String(num);
+  // Unknown/missing status is NOT open — ghost rows must never appear.
+  if (value === undefined || value === null) return false;
+  return value === name || value === num || value === String(num);
 }
 
 /** Open positions: string names or numeric enum values both accepted. */

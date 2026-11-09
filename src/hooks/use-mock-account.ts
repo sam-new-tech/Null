@@ -88,17 +88,24 @@ const currency = new Intl.NumberFormat('en-US', {
 });
 
 export function formatMoney(value: number): string {
-  const formatted = currency.format(Math.abs(value));
-  return value < 0 ? `-${formatted}` : `+${formatted}`;
+  const safe = Number.isFinite(value) ? value : 0;
+  const formatted = currency.format(Math.abs(safe));
+  return safe < 0 ? `-${formatted}` : `+${formatted}`;
 }
 
 export function formatPlainMoney(value: number): string {
-  return currency.format(value);
+  return currency.format(Number.isFinite(value) ? value : 0);
 }
 
 export function formatPrice(symbol: string, value: number): string {
   const base = BASE_PRICE[symbol] ?? 100;
-  return base < 10 ? value.toFixed(4) : value.toFixed(2);
+  const safe = Number.isFinite(value) ? value : 0;
+  return base < 10 ? safe.toFixed(4) : safe.toFixed(2);
+}
+
+/** Display-safe lots with exactly 2 decimals (never throws on bad data). */
+export function formatLots(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : '—';
 }
 
 function clockNow(): string {

@@ -8,6 +8,8 @@ import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { PositionsCard } from '@/components/home/positions-card';
 import { TodaySummary } from '@/components/home/today-summary';
 import { LiveBadge, LogoMark } from '@/components/screen-header';
+import { ConnectionBanner } from '@/components/connection-banner';
+import { ScreenErrorBoundary } from '@/components/screen-error-boundary';
 import { useAuth } from '@/context/auth';
 import { Button } from 'panelui-native/components/button';
 import { liveEngine } from '@/lib/ctrader/live';
@@ -28,17 +30,23 @@ export default function HomeScreen() {
   const { account, stats, positions, live } = useTrading();
   const { logout } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const onRefresh = async () => {
+    if (refreshing) return;
     setRefreshing(true);
+    setRefreshError(null);
     try {
       await liveEngine.refresh();
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
     } finally {
       setRefreshing(false);
     }
   };
 
   return (
+    <ScreenErrorBoundary key={live ? 'live' : 'demo'}>
     <View className="flex-1 bg-background">
       <ChartBackdrop />
       <ScrollView
@@ -46,6 +54,12 @@ export default function HomeScreen() {
         contentContainerStyle={{ paddingBottom: TAB_CLEARANCE }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}>
         <View className="gap-4 p-4">
+          <ConnectionBanner />
+          {refreshError ? (
+            <Text size="sm" className="text-center text-destructive">
+              {refreshError}
+            </Text>
+          ) : null}
           <View className="flex-row items-center justify-between">
             <LogoMark size={48} />
             <View className="flex-row items-center gap-3">
@@ -64,8 +78,9 @@ export default function HomeScreen() {
                 <Button
                   variant="outline"
                   onPress={() => {
-                    logout();
-                    router.replace('/(auth)/login');
+                    // Await first: AuthGuard navigates on `connected`, so a
+                    // premature replace would bounce straight back to tabs.
+                    void logout().then(() => router.replace('/(auth)/login'));
                   }}>
                   Log out
                 </Button>
@@ -85,5 +100,6 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
     </View>
+    </ScreenErrorBoundary>
   );
 }

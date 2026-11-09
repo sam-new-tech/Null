@@ -13,7 +13,8 @@ export function GlassSheen({ radius = 16 }: { radius?: number }) {
       locations={[0, 0.4, 0.75]}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
-      style={[StyleSheet.absoluteFill, { borderRadius: radius, pointerEvents: 'none' }]}
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, { borderRadius: radius }]}
     />
   );
 }

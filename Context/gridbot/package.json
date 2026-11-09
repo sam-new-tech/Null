@@ -6,6 +6,7 @@
   "description": "Grid strategy (Fixed + ATR) backtester in TypeScript — port of Pine Visual Lab docs",
   "scripts": {
     "backtest": "tsx src/run.ts",
+    "filter-experiment": "tsx src/filter-experiment.ts",
     "backtest:csv": "tsx src/run.ts --csv",
     "optimize": "tsx src/optimize.ts",
     "walkforward": "tsx src/walkforward.ts",
@@ -13,6 +14,7 @@
     "dukascopy": "tsx src/dukascopy.ts",
     "fetch": "tsx src/fetch.ts",
     "forex": "tsx src/forex.ts",
+    "filter-sweep": "tsx src/grid-dca-filter-sweep.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/sanity.ts"
   },

@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 
 import {
   CTRADER_CONFIGURED,
+  NEEDS_MANUAL_LINK,
   redirectUri,
   exchangeCode,
   grantUrl,
@@ -60,7 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Restore a stored session silently on launch.
   useEffect(() => {
     if (!CTRADER_CONFIGURED) return;
+    let cancelled = false;
     loadSession().then((session) => {
+      if (cancelled) return;
       if (!session) {
         setHydrated(true);
         return;
@@ -69,17 +72,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       liveEngine
         .start(session)
         .then(() => {
-          setConnected(true);
-          setLive(true);
+          if (cancelled) return;
+          if (liveEngine.connected) {
+            setConnected(true);
+            setLive(true);
+          } else {
+            setError(liveEngine.getSnapshot().error ?? 'Restore failed');
+          }
         })
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : 'Restore failed');
+          if (!cancelled) setError(err instanceof Error ? err.message : 'Restore failed');
         })
         .finally(() => {
-          setBusy(false);
-          setHydrated(true);
+          if (!cancelled) {
+            setBusy(false);
+            setHydrated(true);
+          }
         });
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const completeWithCode = useCallback(async (code: string) => {
@@ -96,6 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await liveEngine.start(session);
     const stored = await loadSession();
     if (!stored) throw new Error('Session was not stored');
+    if (!liveEngine.connected) {
+      const err = liveEngine.getSnapshot().error ?? 'Connection failed';
+      throw new Error(err);
+    }
     setConnected(true);
     setLive(true);
     setStage(null);
@@ -124,6 +141,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await liveEngine.start(session);
       const stored = await loadSession();
       if (!stored) throw new Error('Session was not stored');
+      if (!liveEngine.connected) {
+        throw new Error(liveEngine.getSnapshot().error ?? 'Connection failed');
+      }
       setConnected(true);
       setLive(true);
     } catch (err) {
@@ -150,7 +170,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Web: first-party /oauth callback completes via postMessage (see oauth.tsx).
     if (Platform.OS === 'web') {
-      const listener = (event: MessageEvent) => {        if (event.origin !== window.location.origin) return;
+      let webLoginActive = false;
+      const listener = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
         const data = event.data as { type?: string; ok?: boolean; reason?: string; session?: CTraderSession };
         if (data?.type !== 'ctrader-oauth') return;
         window.removeEventListener('message', listener);
@@ -159,7 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setBusy(false);
           return;
         }
-        finishLoginWith(data.session);
+        // Own busy until login truly finishes — no spinner-drop window.
+        webLoginActive = true;
+        const session = data.session;
+        void (async () => {
+          await finishLoginWith(session);
+        })();
       };
       setBusy(true);
       window.addEventListener('message', listener);
@@ -169,13 +196,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await WebBrowser.openBrowserAsync(grantUrl(redirectUri()));
       } finally {
         window.removeEventListener('message', listener);
-        setBusy(false);
+        if (!webLoginActive) setBusy(false);
       }
       return;
     }
 
     setBusy(true);
     try {
+      // No bridge receives the code automatically (the old auth.expo.io proxy
+      // is deprecated): open the grant page, then the login screen's paste
+      // field is used to finish with the returned link.
+      if (NEEDS_MANUAL_LINK) {
+        await WebBrowser.openBrowserAsync(grantUrl(redirectUri()));
+        return;
+      }
       const result = await WebBrowser.openAuthSessionAsync(grantUrl(redirectUri()), returnUrl());
       if (result.type !== 'success') {
         if (result.type === 'cancel' || result.type === 'dismiss') return;
