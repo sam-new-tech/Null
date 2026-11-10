@@ -75,9 +75,9 @@ covered by a test. No strategy, pricing, order-routing, or navigation change.
 
 ### R4 — Test harness
 - `jest-expo` configured with a `test` script.
-- Unit tests cover: indicator math (`resample5mEMA`, `calculateVDC`,
-  `evaluateSignal`, `calculateLots`), order builders/parsers, trendbar mapping,
-  scaling helpers, and formatters.
+- Unit tests cover: indicator math (`resample5mEMA`, `calculateRSI`,
+  `calculateStochRSI`, `stochTrend`, `evaluateSignal`, `maxOpenPositions`),
+  order builders/parsers, trendbar mapping, scaling helpers, and formatters.
 - Tests pass in CI-style non-watch mode.
 
 ### R5 — App readability and correctness
@@ -107,8 +107,8 @@ covered by a test. No strategy, pricing, order-routing, or navigation change.
 
 Unit (Jest):
 
-1. `engine.test.ts` — EMA resample alignment, VDC bounds/sign, signal gating,
-   lot sizing clamps.
+1. `engine.test.ts` — EMA resample alignment, StochRSI warm-up/bounds,
+   trend bands and signal gating, position slots.
 2. `orders.test.ts` — request payloads, volume conversion, side/status parsers,
    trendbar mapping incl. 1e5 scaling and delta fields.
 3. `scale.test.ts` — spot scaling (int vs double), staleness seconds.

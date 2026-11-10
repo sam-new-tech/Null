@@ -73,7 +73,7 @@ Docs: <https://docs.expo.dev/router/introduction/> ·
   - `src/lib/trading/types.ts` — domain shapes
   - `src/lib/bot/engine.ts` — indicator math
 - Type function parameters as `number` rather than relying on a literal
-  default (`period: number = STRATEGY_PARAMS.vdcPeriod`), otherwise callers
+  default (`period: number = STRATEGY_PARAMS.adxPeriod`), otherwise callers
   cannot pass another period.
 - Guard untrusted payloads with `unknown` + runtime checks, not casts.
   Malformed broker rows must be skipped, never thrown.

@@ -14,9 +14,8 @@ usable.
 
 - Instrument: XAU/USD, 1-minute bars.
 - Filters: 5-minute EMA(50) resampled from 1-minute closes,
-  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25,
-  VDC(20) beyond ±20%.
-- Entries: long when price > EMA and StochRSI K > D and ADX/VDC confirm;
+  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25.
+- Entries: long when price > EMA and StochRSI K > D and ADX confirms;
   short on the mirror condition (K < D). StochRSI is neutral — no entry — when
   either K or D is overbought (≥ 80) or oversold (≤ 20).
 - Exit: fixed ±$2.00 take profit from entry, plus a broker-side TP as a
