@@ -14,7 +14,7 @@ usable.
 
 - Instrument: XAU/USD, 1-minute bars.
 - Filters: 5-minute EMA(50) resampled from 1-minute closes,
-  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 20,
+  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25,
   VDC(20) beyond ±20%.
 - Entries: long when price > EMA and StochRSI K > D and ADX/VDC confirm;
   short on the mirror condition (K < D).
