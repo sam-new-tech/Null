@@ -14,7 +14,7 @@
  */
 
 import { liveEngine } from '../ctrader/live';
-import { scaleSpot } from '../ctrader/wire';
+import { money, scaleSpot } from '../ctrader/wire';
 import { Payload } from '../ctrader/protocol';
 import {
   amendPositionSLTP,
@@ -26,6 +26,7 @@ import {
   TrendbarPeriod,
 } from '../ctrader/orders';
 import { storeGet, storeSet } from '../storage';
+import { ensureNotifyPermissions, notify } from '../notify';
 import {
   calculateIndicators,
   calculateLots,
@@ -45,6 +46,8 @@ export const XAUUSD_UNITS_PER_LOT = 100;
  */
 const BAR_COUNT = 600;
 const MIN_BARS = STRATEGY_PARAMS.ema5mPeriod * 5 + 5;
+/** Retry a TP close if no close deal confirms it within this window. */
+const CLOSE_RETRY_MS = 15_000;
 const STATE_KEY = 'null_strategy_bot.state';
 const LOG_KEY = 'null_strategy_bot.logs';
 
@@ -72,11 +75,9 @@ export interface BotStatus {
   indicators: StrategyIndicators;
   position: ManagedPosition | null;
   openManaged: number;
-  restingCount: number;
   startedAt: number | null;
   lastTick: number | null;
   lastPrice: number | null;
-  coolingDown: boolean;
   logs: BotLogEntry[];
 }
 
@@ -132,7 +133,9 @@ export class BotRunner {
   private spotUnsub: (() => void) | null = null;
   private execUnsub: (() => void) | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private attached = false;
   private pendingCloseId: number | null = null;
+  private pendingCloseAt = 0;
   private pendingEntryTime = 0;
 
   subscribe = (listener: () => void): (() => void) => {
@@ -160,11 +163,9 @@ export class BotRunner {
       indicators: this.currentIndicators,
       position: this.persisted.position,
       openManaged: this.persisted.position ? 1 : 0,
-      restingCount: 0,
       startedAt: this.persisted.startedAt,
       lastTick: this.lastTickAt,
       lastPrice: this.lastPrice,
-      coolingDown: false,
       logs: this.logs.slice(-50),
     };
   }
@@ -283,7 +284,13 @@ export class BotRunner {
    */
   async start(): Promise<void> {
     await this.load();
-    if (this.persisted.state === 'running') return;
+    // A persisted `running` state means the app was restarted (or reconnected)
+    // mid-session: reattach live events/history instead of silently doing nothing.
+    if (this.persisted.state === 'running') {
+      if (!liveEngine.connected) throw new Error('Connect cTrader account first');
+      await this.resume();
+      return;
+    }
     if (this.starting) throw new Error('Bot is currently starting');
     if (!liveEngine.connected) throw new Error('Connect cTrader account first');
 
@@ -321,6 +328,8 @@ export class BotRunner {
       if (this.refreshTimer) clearInterval(this.refreshTimer);
       this.refreshTimer = setInterval(() => void this.syncBars(), 60_000);
 
+      void ensureNotifyPermissions();
+
       this.log(
         'info',
         `Strategy armed! 5mEMA: ${this.currentIndicators.ema5m?.toFixed(2) ?? '—'}, ADX: ${this.currentIndicators.adx?.toFixed(1) ?? '—'}, VDC: ${this.currentIndicators.vdc?.toFixed(1) ?? '—'}%`,
@@ -335,6 +344,42 @@ export class BotRunner {
       this.starting = false;
       this.emit();
     }
+  }
+
+  /**
+   * Reattach a strategy that was already running before a restart/reconnect:
+   * subscriptions, spot stream, bar timer and a history resync. Safe to call
+   * repeatedly — the timer is created once and events detach/reattach.
+   */
+  async resume(): Promise<void> {
+    await this.load();
+    if (this.persisted.state !== 'running') return;
+    if (!liveEngine.connected) return;
+
+    const symbolId = this.persisted.symbolId || this.symbolId(this.persisted.symbol);
+    this.persisted.symbolId = symbolId;
+    // Without a spot subscription real-time entries and TP checks stay silent.
+    liveEngine.ensureSpots([symbolId]);
+
+    const wasAttached = this.attached;
+    this.attachEvents();
+    if (!this.refreshTimer) {
+      this.refreshTimer = setInterval(() => void this.syncBars(), 60_000);
+    }
+    if (!wasAttached) {
+      this.log('info', 'Bot resumed — reattached live events');
+      void ensureNotifyPermissions();
+    }
+    await this.syncBars();
+    this.emit();
+  }
+
+  /** Called after login/restore and on the bot screen mount. */
+  async resumeIfRunning(): Promise<void> {
+    await this.load();
+    if (this.persisted.state !== 'running') return;
+    if (!liveEngine.connected) return;
+    await this.resume();
   }
 
   /**
@@ -365,6 +410,8 @@ export class BotRunner {
       this.persisted.position = null;
       this.persisted.state = 'stopped';
       this.persisted.startedAt = null;
+      this.pendingCloseId = null;
+      this.pendingCloseAt = 0;
       await this.persist();
       this.log('info', 'Bot stopped successfully');
     } finally {
@@ -378,6 +425,7 @@ export class BotRunner {
    */
   private attachEvents(): void {
     this.detachEvents();
+    this.attached = true;
 
     // 1. Spot events (ticks)
     this.spotUnsub = liveEngine.onEvent(Payload.SpotEvent, (payload: Record<string, unknown>) => {
@@ -406,6 +454,7 @@ export class BotRunner {
   }
 
   private detachEvents(): void {
+    this.attached = false;
     if (this.spotUnsub) {
       this.spotUnsub();
       this.spotUnsub = null;
@@ -425,9 +474,12 @@ export class BotRunner {
     // A. Check Take Profit for open position
     if (pos) {
       const hitTp = (pos.side === 'buy' && price >= pos.tp) || (pos.side === 'sell' && price <= pos.tp);
+      const closeInFlight =
+        this.pendingCloseId === pos.id && Date.now() - this.pendingCloseAt < CLOSE_RETRY_MS;
 
-      if (hitTp && this.pendingCloseId !== pos.id) {
+      if (hitTp && !closeInFlight) {
         this.pendingCloseId = pos.id;
+        this.pendingCloseAt = Date.now();
         this.log(
           'close',
           `TP reached! Price ${price.toFixed(2)} hit ${pos.tp.toFixed(2)} (${pos.side.toUpperCase()}) — closing position`,
@@ -437,6 +489,7 @@ export class BotRunner {
           liveEngine.execSend(pair.type, pair.payload);
         } catch (err) {
           this.pendingCloseId = null;
+          this.pendingCloseAt = 0;
           this.log('error', `Close request failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
@@ -538,8 +591,13 @@ export class BotRunner {
         };
         this.pendingEntryTime = 0;
         this.pendingCloseId = null;
+        this.pendingCloseAt = 0;
 
         this.log('fill', `Filled ${side.toUpperCase()} ${posId} @ ${executionPrice.toFixed(2)} (TP: ${tp.toFixed(2)})`);
+        void notify(
+          'Bot filled',
+          `${side.toUpperCase()} ${this.persisted.symbol} @ ${executionPrice.toFixed(2)} (TP ${tp.toFixed(2)})`,
+        );
 
         // Register broker-side TP as safety net
         try {
@@ -561,12 +619,22 @@ export class BotRunner {
     if (deal?.closePositionDetail && deal.positionId !== undefined) {
       const closedPosId = Number(deal.positionId);
       if (this.persisted.position && this.persisted.position.id === closedPosId) {
-        const detail = deal.closePositionDetail as { grossProfit?: number };
-        const grossProfit = Number(detail.grossProfit ?? 0) / 100;
+        const detail = deal.closePositionDetail as { grossProfit?: number; moneyDigits?: number };
+        const traderDigits = liveEngine.getSnapshot().trader?.moneyDigits ?? 2;
+        // Close details are integer-scaled by moneyDigits (often 2), same as balance.
+        const grossProfit = money(
+          typeof detail.grossProfit === 'number' ? detail.grossProfit : undefined,
+          typeof detail.moneyDigits === 'number' ? detail.moneyDigits : traderDigits,
+        );
 
         this.persisted.position = null;
         this.pendingCloseId = null;
+        this.pendingCloseAt = 0;
         this.log('close', `Position ${closedPosId} closed! P/L: ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)}`);
+        void notify(
+          'Bot closed',
+          `${this.persisted.symbol} P/L ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)}`,
+        );
 
         void this.persist();
         this.emit();
@@ -616,27 +684,6 @@ export class BotRunner {
    */
   async stop(): Promise<void> {
     return this.stopAll();
-  }
-
-  /**
-   * Closes the managed position (or cancels nothing for orders scope).
-   * Called by trades.tsx "close all" button.
-   */
-  async flattenAll(
-    _managed: boolean,
-    _side?: string,
-    scope?: 'orders' | 'positions',
-  ): Promise<void> {
-    if (scope === 'orders') return; // No resting orders in this strategy
-    const pos = this.persisted.position;
-    if (!pos) return;
-    this.log('close', `flattenAll: closing managed position ${pos.id}`);
-    try {
-      const pair = closePosition(this.accountId(), pos.id, 0, XAUUSD_UNITS_PER_LOT, pos.volume);
-      liveEngine.execSend(pair.type, pair.payload);
-    } catch (err) {
-      throw new Error(`flattenAll failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 }
 

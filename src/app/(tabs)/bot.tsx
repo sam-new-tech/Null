@@ -103,6 +103,13 @@ export default function BotScreen() {
     void botRunner.load();
   }, []);
 
+  // A persisted running strategy must reattach when the account becomes ready
+  // (app restart, reconnect, or a restored session that finishes after mount).
+  useEffect(() => {
+    if (live.status !== 'ready') return;
+    void botRunner.resumeIfRunning();
+  }, [live.status]);
+
   const running = status.state === 'running';
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
@@ -242,11 +249,6 @@ export default function BotScreen() {
                 <LivePrice symbol={status.symbol} />
               </View>
           </View>
-          {status.coolingDown && (
-            <Text size="sm" muted className="text-center">
-              Taking a short break — back on its own soon
-            </Text>
-          )}
           <View className="flex-row flex-wrap gap-3">
             <StatTile
               label="Position"

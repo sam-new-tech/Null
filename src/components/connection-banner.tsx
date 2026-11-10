@@ -1,5 +1,6 @@
 import { Pressable, View } from 'react-native';
 
+import { connectionBannerLabel } from '@/lib/connection-status';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { Text } from 'panelui-native/primitives/text';
 
@@ -12,18 +13,9 @@ import { Text } from 'panelui-native/primitives/text';
  */
 export function ConnectionBanner({ onRetry }: { onRetry?: () => void }) {
   const live = useLive();
-  const health = liveEngine.health();
+  const label = connectionBannerLabel(live.status, live.error, liveEngine.health());
 
-  if (live.status === 'ready' && !health.stale) return null;
-
-  const label =
-    live.status === 'connecting'
-      ? 'Reconnecting to cTrader…'
-      : live.status === 'error'
-        ? (live.error ?? 'Connection failed')
-        : health.stale
-          ? 'Stream stale — reconnecting…'
-          : 'Connecting…';
+  if (!label) return null;
 
   return (
     <View className="flex-row items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-2.5">

@@ -76,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (liveEngine.connected) {
             setConnected(true);
             setLive(true);
+            // Persisted bot state may still be `running` from before relaunch.
+            void botRunner.resumeIfRunning();
           } else {
             setError(liveEngine.getSnapshot().error ?? 'Restore failed');
           }
@@ -104,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setConnected(true);
     setLive(true);
+    void botRunner.resumeIfRunning();
   }, []);
 
   const completeWithCode = useCallback(
@@ -172,7 +175,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Web: first-party /oauth callback completes via postMessage (see oauth.tsx).
+    // Web: the hosted first-party callback page posts the session back with
+    // postMessage; no local oauth.tsx route exists in this app.
     if (Platform.OS === 'web') {
       let webLoginActive = false;
       const listener = (event: MessageEvent) => {

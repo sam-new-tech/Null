@@ -347,7 +347,9 @@ export function isRestingOrderStatus(value: unknown): boolean {
 }
 
 export function isFilledStatus(value: unknown): boolean {
-  return value === 'ORDER_STATUS_FILLED' || value === 2 || value === '2';
+  // Execution events carry ORDER_FILLED (event type); order rows carry
+  // ORDER_STATUS_FILLED (order status) or the numeric enum value 2.
+  return value === 'ORDER_STATUS_FILLED' || value === 'ORDER_FILLED' || value === 2 || value === '2';
 }
 
 export function isRejectedStatus(value: unknown): boolean {

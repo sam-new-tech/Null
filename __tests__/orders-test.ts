@@ -146,6 +146,7 @@ describe('response parsers', () => {
     expect(isRestingOrderStatus(2)).toBe(false);
 
     expect(isFilledStatus('ORDER_STATUS_FILLED')).toBe(true);
+    expect(isFilledStatus('ORDER_FILLED')).toBe(true);
     expect(isFilledStatus('2')).toBe(true);
     expect(isRejectedStatus('ORDER_REJECTED')).toBe(true);
     expect(isRejectedStatus(7)).toBe(true);

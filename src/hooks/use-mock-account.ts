@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { REFERENCE_PRICES } from '@/constants/markets';
+import { unitsPerLot } from '@/lib/ctrader/orders';
 import type { ClosedTrade, MockAccount, Position, Side } from '@/lib/trading/types';
 
 const TICK_MS = 2500;
@@ -28,12 +29,14 @@ function randomPosition(): Position {
   const openPrice = REFERENCE_PRICES[symbol];
   const distance = openPrice * (0.002 + Math.random() * 0.006);
   const direction = side === 'buy' ? 1 : -1;
+  const volume = [0.01, 0.05, 0.1][Math.floor(Math.random() * 3)];
   return {
     id: nextId++,
     symbol,
     side,
-    volume: [0.01, 0.05, 0.1][Math.floor(Math.random() * 3)],
-    rawVolume: 100,
+    volume,
+    // Same formula as orders.ts: protocol volume = lots × units/lot × 100.
+    rawVolume: Math.round(volume * unitsPerLot(symbol) * 100),
     pl: (Math.random() - 0.5) * 8,
     openPrice,
     tp: openPrice + direction * distance,

@@ -10,15 +10,26 @@ const BIND_KEY = 'license.binding';
 
 const PEPPER = process.env.EXPO_PUBLIC_LICENSE_PEPPER ?? '';
 
+/** Minted keys are `NULL` + 12 chars (grouping hyphens are ignored). */
+const LICENSE_KEY_RE = /^NULL[A-Z0-9]{12}$/;
+
 function norm(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export function normalizeLicenseKey(value: string): string {
+  return norm(value);
+}
+
+/** Reject anything the seller's mint script could not have produced. */
+export function isValidLicenseKeyFormat(value: string): boolean {
+  return LICENSE_KEY_RE.test(norm(value));
 }
 
 function randomId(): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789abcdefghijklmnopqrstuvwxyz';
   let out = '';
-  const buf = new Uint8Array(16);
-  for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+  const buf = Crypto.getRandomBytes(16);
   for (const b of buf) out += chars[b % chars.length];
   return out;
 }
@@ -48,6 +59,7 @@ async function bindingFor(key: string, device: string): Promise<string | null> {
 export async function activateLicense(key: string): Promise<void> {
   const cleanKey = norm(key);
   if (cleanKey.length < 16) throw new Error('That code looks too short');
+  if (!isValidLicenseKeyFormat(cleanKey)) throw new Error('That code is not a valid license key');
   const device = await deviceId();
   const binding = await bindingFor(cleanKey, device);
   if (binding === null) throw new Error('App is missing its license pepper — reinstall from the seller');

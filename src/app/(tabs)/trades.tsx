@@ -14,8 +14,8 @@ import { formatLots, formatMoney, formatPrice } from '@/lib/format';
 import { useRefresh } from '@/hooks/use-refresh';
 import { isWeekendMarketClosed } from '@/lib/market-hours';
 import { useTrading } from '@/lib/trading/useTrading';
+import { cancelOrders, closePositions } from '@/lib/trading/actions';
 import { liveEngine } from '@/lib/ctrader/live';
-import { botRunner } from '@/lib/bot/runner';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
@@ -83,8 +83,9 @@ export default function TradesScreen() {
     setClosing(true);
     setCloseError(null);
     try {
-      // Positions tab flattens fills; Orders tab cancels limits only.
-      await botRunner.flattenAll(false, undefined, tab === 'orders' ? 'orders' : 'positions');
+      // Every row on the active tab is affected — not just bot-managed ones.
+      if (tab === 'orders') cancelOrders(liveEngine, orders);
+      else closePositions(liveEngine, positions);
       await liveEngine.refresh();
       setConfirmOpen(false);
     } catch (err) {
@@ -153,7 +154,7 @@ export default function TradesScreen() {
                   </Card.Content>
                 </Card>
               )}
-              {(positions.length > 0 || orders.length > 0) && live && (
+              {positions.length > 0 && live && (
                 <Button
                   variant="destructive"
                   fullWidth
