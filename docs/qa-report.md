@@ -21,6 +21,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `f633cae` | `feat(bot)`: bot screen now shows the StochRSI K-vs-D trend (BULLISH/BEARISH/FLAT) in place of the position count. |
 | `c297a21` | `feat(bot)`: removed the K/D value tile and lowered the ADX(14) filter to strictly above 20. |
 | `1ff2ea9` | `revert(bot)`: restored the ADX(14) filter to strictly above 25 before the preview build. |
+| `8610650` | `feat(bot)`: StochRSI trend (and entries) become NEUTRAL while K or D is overbought/oversold (≥ 80 or ≤ 20). |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
