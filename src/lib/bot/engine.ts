@@ -5,12 +5,12 @@
  * - Timeframe: 1-minute bars
  * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
  * - 1-minute Stochastic RSI (K=9, D=3, RSI=14, Stoch=14) — TradingView ta.stoch(ta.rsi(close,14)...)
- * - 1-minute ADX(14) (threshold: > 25.0)
+ * - 1-minute ADX(14) (threshold: > 20.0)
  * - 1-minute VDC (Volume Delta Control, timeperiod=20, threshold=20.0, splitmode="candle")
  *
  * Signals:
- * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
- * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
+ * - Long:  price > ema50_5m AND stochK > stochD AND adx > 20.0 AND vdc > 20.0  -> Take Profit = price + 2.0
+ * - Short: price < ema50_5m AND stochK < stochD AND adx > 20.0 AND vdc < -20.0 -> Take Profit = price - 2.0
  *
  * Position Rules:
  * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
@@ -50,7 +50,7 @@ export interface StrategySignal {
 
 export const STRATEGY_PARAMS = {
   symbol: 'XAUUSD',
-  adxThreshold: 25.0,
+  adxThreshold: 20.0,
   vdcThreshold: 20.0,
   tpDelta: 2.0, // Fixed $2.00 gold profit target
   ema5mPeriod: 50,
@@ -372,7 +372,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
   const stochDown = ind.stochK < ind.stochD;
 
   // Long entry condition:
-  // price > ema AND stochK > stochD AND adx > 25.0 AND vdc > 20.0
+  // price > ema AND stochK > stochD AND adx > 20.0 AND vdc > 20.0
   if (
     price > ind.ema5m &&
     stochUp &&
@@ -388,12 +388,12 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
     };
   }
 
   // Short entry condition:
-  // price < ema AND stochK < stochD AND adx > 25.0 AND vdc < -20.0
+  // price < ema AND stochK < stochD AND adx > 20.0 AND vdc < -20.0
   if (
     price < ind.ema5m &&
     stochDown &&
@@ -409,7 +409,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
     };
   }
 

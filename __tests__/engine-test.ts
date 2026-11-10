@@ -171,7 +171,8 @@ describe('evaluateSignal', () => {
   });
 
   it('stays flat when a threshold is not strictly exceeded', () => {
-    expect(evaluateSignal(bars, [indicators({ adx: 25 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ adx: 20 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ adx: 20.1 })]).action).toBe('buy');
     expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('none');
     expect(evaluateSignal(bars, [indicators({ vdc: 0 })]).action).toBe('none');
   });

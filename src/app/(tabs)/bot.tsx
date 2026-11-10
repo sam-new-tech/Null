@@ -275,10 +275,6 @@ export default function BotScreen() {
               valueClassName={trend.className}
             />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
-            <StatTile
-              label="StochRSI K/D"
-              value={`${formatIndicator(status.indicators.stochK, 1)} / ${formatIndicator(status.indicators.stochD, 1)}`}
-            />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
             <StatTile
               label="VDC (20)"

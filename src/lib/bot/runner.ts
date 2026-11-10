@@ -7,7 +7,7 @@
  * - Indicators:
  *   - 5m EMA(50) (resampled from 1m closes, forward-filled)
  *   - 1m Stochastic RSI (K 9, D 3, RSI 14, Stoch 14)
- *   - 1m ADX(14) > 25
+ *   - 1m ADX(14) > 20
  *   - 1m VDC(20) > 20 (buy) / < -20 (sell)
  * - Take Profit: Entry ± 2.0 (fixed $2.00 target on Gold)
  * - Fixed 0.01 lots, up to floor(equity / 20) concurrent positions.
@@ -349,7 +349,7 @@ export class BotRunner {
 
       this.log(
         'info',
-        `Strategy armed! 5mEMA: ${this.currentIndicators.ema5m?.toFixed(2) ?? '—'}, StochRSI K/D: ${this.currentIndicators.stochK?.toFixed(1) ?? '—'}/${this.currentIndicators.stochD?.toFixed(1) ?? '—'}, ADX: ${this.currentIndicators.adx?.toFixed(1) ?? '—'}, VDC: ${this.currentIndicators.vdc?.toFixed(1) ?? '—'}%`,
+        `Strategy armed! 5mEMA: ${this.currentIndicators.ema5m?.toFixed(2) ?? '—'}, ADX: ${this.currentIndicators.adx?.toFixed(1) ?? '—'}, VDC: ${this.currentIndicators.vdc?.toFixed(1) ?? '—'}%`,
       );
       if (this.currentIndicators.ema5m === null) {
         this.log(
