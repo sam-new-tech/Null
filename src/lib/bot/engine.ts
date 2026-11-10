@@ -341,9 +341,21 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
 }
 
 /**
- * Standard lot sizing based on account equity, clamped between 0.01 and maxLots.
- * 0.01 lot per $50 of equity (equity / 5000), default cap 0.05.
+ * Fixed lot size per signal. Sizing no longer scales with equity — the number
+ * of concurrent 0.01-lot positions does.
  */
+export const BOT_LOT_SIZE = 0.01;
+
+/**
+ * Maximum concurrent managed positions for an account: floor(equity / $20).
+ * Non-finite or non-positive equity yields 0 slots.
+ */
+export function maxOpenPositions(equity: number): number {
+  if (!Number.isFinite(equity) || equity <= 0) return 0;
+  return Math.floor(equity / 20);
+}
+
+/** @deprecated Kept only for the legacy research sandbox; the live bot uses {@link BOT_LOT_SIZE}. */
 export function calculateLots(equity: number, cap = 0.05): number {
   if (!Number.isFinite(equity) || equity <= 0) return 0.01;
   const scaled = Math.floor((equity / 10000) * 2 * 100) / 100;

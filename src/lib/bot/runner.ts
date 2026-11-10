@@ -28,9 +28,10 @@ import {
 import { storeGet, storeSet } from '../storage';
 import { ensureNotifyPermissions, notify } from '../notify';
 import {
+  BOT_LOT_SIZE,
   calculateIndicators,
-  calculateLots,
   evaluateSignal,
+  maxOpenPositions,
   STRATEGY_PARAMS,
   type Bar,
   type StrategyIndicators,
@@ -73,8 +74,9 @@ export interface BotStatus {
   volumeLots: number;
   trendEma: number | null;
   indicators: StrategyIndicators;
-  position: ManagedPosition | null;
+  positions: ManagedPosition[];
   openManaged: number;
+  maxManaged: number;
   startedAt: number | null;
   lastTick: number | null;
   lastPrice: number | null;
@@ -87,17 +89,20 @@ interface PersistedState {
   symbolId: number;
   digits: number;
   volumeLots: number;
-  position: ManagedPosition | null;
+  positions: ManagedPosition[];
   startedAt: number | null;
 }
+
+/** Pre-multi-position state stored a single `position`; migrate it on load. */
+type LegacyPersistedState = Partial<PersistedState> & { position?: ManagedPosition | null };
 
 const DEFAULT_PERSISTED: PersistedState = {
   state: 'stopped',
   symbol: STRATEGY_PARAMS.symbol,
   symbolId: 0,
   digits: 2,
-  volumeLots: 0.01,
-  position: null,
+  volumeLots: BOT_LOT_SIZE,
+  positions: [],
   startedAt: null,
 };
 
@@ -134,9 +139,11 @@ export class BotRunner {
   private execUnsub: (() => void) | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private attached = false;
-  private pendingCloseId: number | null = null;
-  private pendingCloseAt = 0;
+  /** Last close attempt per position id (retry gate for unconfirmed TPs). */
+  private pendingCloseAt = new Map<number, number>();
   private pendingEntryTime = 0;
+  /** Last bar timestamp that produced an entry — one entry per closed bar. */
+  private lastEntryBarTime = 0;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -155,14 +162,16 @@ export class BotRunner {
   getLivePrice = (): number | null => this.lastPrice;
 
   getStatus(): BotStatus {
+    const positions = this.persisted.positions;
     return {
       state: this.persisted.state,
       symbol: this.persisted.symbol,
       volumeLots: this.persisted.volumeLots,
       trendEma: this.currentIndicators.ema5m,
       indicators: this.currentIndicators,
-      position: this.persisted.position,
-      openManaged: this.persisted.position ? 1 : 0,
+      positions,
+      openManaged: positions.length,
+      maxManaged: maxOpenPositions(liveEngine.accountState().equity),
       startedAt: this.persisted.startedAt,
       lastTick: this.lastTickAt,
       lastPrice: this.lastPrice,
@@ -171,10 +180,11 @@ export class BotRunner {
   }
 
   managedPlAt(price: number): number {
-    const pos = this.persisted.position;
-    if (!pos || !Number.isFinite(price) || price <= 0) return 0;
-    const units = pos.lots * XAUUSD_UNITS_PER_LOT;
-    return pos.side === 'buy' ? (price - pos.entry) * units : (pos.entry - price) * units;
+    if (!Number.isFinite(price) || price <= 0) return 0;
+    return this.persisted.positions.reduce((sum, pos) => {
+      const units = pos.lots * XAUUSD_UNITS_PER_LOT;
+      return sum + (pos.side === 'buy' ? (price - pos.entry) * units : (pos.entry - price) * units);
+    }, 0);
   }
 
   private emit(): void {
@@ -211,10 +221,18 @@ export class BotRunner {
     try {
       const raw = await storeGet(STATE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<PersistedState>;
+        const parsed = JSON.parse(raw) as LegacyPersistedState;
+        const { position: legacyPosition, positions: storedPositions, ...rest } = parsed;
         this.persisted = {
           ...DEFAULT_PERSISTED,
-          ...parsed,
+          ...rest,
+          // Sizing is fixed now; ignore pre-upgrade equity-scaled values.
+          volumeLots: BOT_LOT_SIZE,
+          positions: Array.isArray(storedPositions)
+            ? storedPositions
+            : legacyPosition
+              ? [legacyPosition]
+              : [],
         };
       }
       const rawLogs = await storeGet(LOG_KEY);
@@ -395,23 +413,26 @@ export class BotRunner {
         this.refreshTimer = null;
       }
 
-      // Close open position if any
-      const pos = this.persisted.position;
-      if (pos) {
-        this.log('close', `Closing managed position ${pos.id} on bot stop`);
-        try {
-          const pair = closePosition(this.accountId(), pos.id, 0, 100, pos.volume);
-          liveEngine.execSend(pair.type, pair.payload);
-        } catch (err) {
-          this.log('error', `Failed to close position: ${err instanceof Error ? err.message : String(err)}`);
+      // Close every managed position.
+      if (this.persisted.positions.length > 0) {
+        this.log('close', `Closing ${this.persisted.positions.length} managed position(s) on bot stop`);
+        for (const pos of this.persisted.positions) {
+          try {
+            const pair = closePosition(this.accountId(), pos.id, 0, 100, pos.volume);
+            liveEngine.execSend(pair.type, pair.payload);
+          } catch (err) {
+            this.log(
+              'error',
+              `Failed to close position ${pos.id}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
       }
 
-      this.persisted.position = null;
+      this.persisted.positions = [];
       this.persisted.state = 'stopped';
       this.persisted.startedAt = null;
-      this.pendingCloseId = null;
-      this.pendingCloseAt = 0;
+      this.pendingCloseAt.clear();
       await this.persist();
       this.log('info', 'Bot stopped successfully');
     } finally {
@@ -469,34 +490,31 @@ export class BotRunner {
    * Handle incoming spot tick.
    */
   private handleTick(price: number): void {
-    const pos = this.persisted.position;
+    // A. Check Take Profit for every open position.
+    if (this.persisted.positions.length > 0) {
+      const now = Date.now();
+      for (const pos of this.persisted.positions) {
+        const hitTp = (pos.side === 'buy' && price >= pos.tp) || (pos.side === 'sell' && price <= pos.tp);
+        const lastAttempt = this.pendingCloseAt.get(pos.id) ?? 0;
+        if (!hitTp || now - lastAttempt < CLOSE_RETRY_MS) continue;
 
-    // A. Check Take Profit for open position
-    if (pos) {
-      const hitTp = (pos.side === 'buy' && price >= pos.tp) || (pos.side === 'sell' && price <= pos.tp);
-      const closeInFlight =
-        this.pendingCloseId === pos.id && Date.now() - this.pendingCloseAt < CLOSE_RETRY_MS;
-
-      if (hitTp && !closeInFlight) {
-        this.pendingCloseId = pos.id;
-        this.pendingCloseAt = Date.now();
+        this.pendingCloseAt.set(pos.id, now);
         this.log(
           'close',
-          `TP reached! Price ${price.toFixed(2)} hit ${pos.tp.toFixed(2)} (${pos.side.toUpperCase()}) — closing position`,
+          `TP reached! Price ${price.toFixed(2)} hit ${pos.tp.toFixed(2)} (${pos.side.toUpperCase()}) — closing position ${pos.id}`,
         );
         try {
           const pair = closePosition(this.accountId(), pos.id, 0, 100, pos.volume);
           liveEngine.execSend(pair.type, pair.payload);
         } catch (err) {
-          this.pendingCloseId = null;
-          this.pendingCloseAt = 0;
+          this.pendingCloseAt.delete(pos.id);
           this.log('error', `Close request failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      return;
     }
 
-    // B. Real-time forming 1-minute bar update
+    // B. Real-time forming 1-minute bar update (runs with or without positions,
+    // so bar history stays continuous for the next signal).
     const now = Date.now();
     const currentMinute = Math.floor(now / 60_000) * 60_000;
 
@@ -504,7 +522,7 @@ export class BotRunner {
       // Previous forming bar closed: push to historical bars
       if (this.formingBar) {
         this.bars.push(this.formingBar);
-        if (this.bars.length > 250) this.bars.shift();
+        if (this.bars.length > BAR_COUNT) this.bars.shift();
 
         // Evaluate signal on closed bar!
         this.evaluateAndTrade();
@@ -530,7 +548,10 @@ export class BotRunner {
    * Evaluate strategy signal and execute trade if criteria met.
    */
   private evaluateAndTrade(): void {
-    if (this.persisted.state !== 'running' || this.persisted.position !== null) return;
+    if (this.persisted.state !== 'running') return;
+    const equity = liveEngine.accountState().equity;
+    const maxPositions = maxOpenPositions(equity);
+    if (this.persisted.positions.length >= maxPositions) return;
     if (Date.now() - this.pendingEntryTime < 10_000) return; // Order in flight
 
     const allInds = calculateIndicators(this.bars);
@@ -539,17 +560,23 @@ export class BotRunner {
     const signal: StrategySignal = evaluateSignal(this.bars, allInds);
 
     if (signal.action === 'buy' || signal.action === 'sell') {
-      const equity = liveEngine.accountState().equity;
-      const lots = calculateLots(equity, 0.05);
+      // One entry per closed bar: the timer sync and the tick loop can both
+      // observe the same latest bar.
+      const barTime = this.bars[this.bars.length - 1]?.time ?? 0;
+      if (barTime === this.lastEntryBarTime) return;
 
+      this.lastEntryBarTime = barTime;
       this.pendingEntryTime = Date.now();
-      this.log('signal', `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${lots} lots (TP: ${signal.tp.toFixed(2)})`);
+      this.log(
+        'signal',
+        `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${BOT_LOT_SIZE} lots (${this.persisted.positions.length + 1}/${maxPositions}, TP: ${signal.tp.toFixed(2)})`,
+      );
 
       try {
         const pair = placeMarketOrder(this.accountId(), {
           symbolId: this.persisted.symbolId,
           side: signal.action,
-          volumeLots: lots,
+          volumeLots: BOT_LOT_SIZE,
           label: `${BOT_LABEL_PREFIX}_${signal.action}`,
           unitsPerLot: XAUUSD_UNITS_PER_LOT,
         });
@@ -576,24 +603,29 @@ export class BotRunner {
       const volume = Number(deal?.volume ?? position?.volume ?? 0);
       const side = asSide(order?.tradeSide ?? deal?.tradeSide);
 
-      if (posId > 0 && executionPrice > 0 && this.persisted.position === null) {
-        const lots = volume > 0 ? volume / (XAUUSD_UNITS_PER_LOT * 100) : calculateLots(liveEngine.accountState().equity);
+      if (posId > 0 && executionPrice > 0 && !this.persisted.positions.some((p) => p.id === posId)) {
+        const lots = volume > 0 ? volume / (XAUUSD_UNITS_PER_LOT * 100) : BOT_LOT_SIZE;
         const tp = side === 'buy' ? executionPrice + STRATEGY_PARAMS.tpDelta : executionPrice - STRATEGY_PARAMS.tpDelta;
 
-        this.persisted.position = {
-          id: posId,
-          side,
-          entry: executionPrice,
-          tp,
-          volume,
-          lots: Math.max(0.01, Math.round(lots * 100) / 100),
-          openedAt: Date.now(),
-        };
+        this.persisted.positions = [
+          ...this.persisted.positions,
+          {
+            id: posId,
+            side,
+            entry: executionPrice,
+            tp,
+            volume,
+            lots: Math.max(BOT_LOT_SIZE, Math.round(lots * 100) / 100),
+            openedAt: Date.now(),
+          },
+        ];
         this.pendingEntryTime = 0;
-        this.pendingCloseId = null;
-        this.pendingCloseAt = 0;
+        this.pendingCloseAt.delete(posId);
 
-        this.log('fill', `Filled ${side.toUpperCase()} ${posId} @ ${executionPrice.toFixed(2)} (TP: ${tp.toFixed(2)})`);
+        this.log(
+          'fill',
+          `Filled ${side.toUpperCase()} ${posId} @ ${executionPrice.toFixed(2)} (TP: ${tp.toFixed(2)}, ${this.persisted.positions.length} open)`,
+        );
         void notify(
           'Bot filled',
           `${side.toUpperCase()} ${this.persisted.symbol} @ ${executionPrice.toFixed(2)} (TP ${tp.toFixed(2)})`,
@@ -618,7 +650,8 @@ export class BotRunner {
     // 2. Position Closed
     if (deal?.closePositionDetail && deal.positionId !== undefined) {
       const closedPosId = Number(deal.positionId);
-      if (this.persisted.position && this.persisted.position.id === closedPosId) {
+      const closed = this.persisted.positions.find((p) => p.id === closedPosId);
+      if (closed) {
         const detail = deal.closePositionDetail as { grossProfit?: number; moneyDigits?: number };
         const traderDigits = liveEngine.getSnapshot().trader?.moneyDigits ?? 2;
         // Close details are integer-scaled by moneyDigits (often 2), same as balance.
@@ -627,10 +660,12 @@ export class BotRunner {
           typeof detail.moneyDigits === 'number' ? detail.moneyDigits : traderDigits,
         );
 
-        this.persisted.position = null;
-        this.pendingCloseId = null;
-        this.pendingCloseAt = 0;
-        this.log('close', `Position ${closedPosId} closed! P/L: ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)}`);
+        this.persisted.positions = this.persisted.positions.filter((p) => p.id !== closedPosId);
+        this.pendingCloseAt.delete(closedPosId);
+        this.log(
+          'close',
+          `Position ${closedPosId} closed! P/L: ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)} (${this.persisted.positions.length} open)`,
+        );
         void notify(
           'Bot closed',
           `${this.persisted.symbol} P/L ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)}`,
@@ -655,10 +690,8 @@ export class BotRunner {
         this.currentIndicators = allInds[allInds.length - 1] ?? this.currentIndicators;
         this.emit();
 
-        // Check entry condition on sync
-        if (this.persisted.position === null) {
-          this.evaluateAndTrade();
-        }
+        // Check entry condition on sync (evaluateAndTrade enforces the slot cap).
+        this.evaluateAndTrade();
       }
     } catch {
       // Best effort

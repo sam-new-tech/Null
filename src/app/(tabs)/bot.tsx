@@ -16,7 +16,7 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
-import { videoLots } from '@/lib/bot/engine';
+import { BOT_LOT_SIZE, maxOpenPositions } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
@@ -113,7 +113,7 @@ export default function BotScreen() {
   const running = status.state === 'running';
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
-  const autoLots = videoLots(equity, 0.05);
+  const maxManaged = maxOpenPositions(equity);
   const gateMessage =
     live.status === 'error'
       ? (live.error ?? 'Connection failed — retry')
@@ -187,7 +187,7 @@ export default function BotScreen() {
             <Dialog.Content>
               <Dialog.Title>Start Strategy</Dialog.Title>
               <Dialog.Description>
-                {`XAU/USD 1m Momentum Strategy · Fixed TP $2.00 target.\n~${autoLots.toFixed(2)} lots from $${equity.toFixed(2)} equity.`}
+                {`XAU/USD 1m Momentum Strategy · Fixed TP $2.00 target.\n${BOT_LOT_SIZE.toFixed(2)} lots per signal · up to ${maxManaged} concurrent positions from $${equity.toFixed(2)} equity.`}
                 {weekend ? ' Weekend: rests at open.' : ''}
               </Dialog.Description>
               {startError ? (
@@ -252,7 +252,11 @@ export default function BotScreen() {
           <View className="flex-row flex-wrap gap-3">
             <StatTile
               label="Position"
-              value={status.position ? `${status.position.side.toUpperCase()} ${status.position.lots}L` : 'FLAT'}
+              value={
+                status.openManaged === 0
+                  ? 'FLAT'
+                  : `${status.openManaged}/${status.maxManaged} · ${(status.openManaged * BOT_LOT_SIZE).toFixed(2)}L`
+              }
             />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
@@ -314,8 +318,8 @@ export default function BotScreen() {
             <Dialog.Content>
               <Dialog.Title>Stop bot?</Dialog.Title>
               <Dialog.Description>
-                {status.openManaged
-                  ? 'Close the open managed trade and stop the bot? Manual trades stay.'
+                {status.openManaged > 0
+                  ? `Close ${status.openManaged} managed ${status.openManaged === 1 ? 'trade' : 'trades'} and stop the bot? Manual trades stay.`
                   : 'Stop the strategy bot?'}
               </Dialog.Description>
               {weekend ? (

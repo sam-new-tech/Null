@@ -1,8 +1,9 @@
 import {
+  BOT_LOT_SIZE,
   calculateIndicators,
-  calculateLots,
   calculateVDC,
   evaluateSignal,
+  maxOpenPositions,
   resample5mEMA,
   type Bar,
   type StrategyIndicators,
@@ -86,14 +87,20 @@ describe('calculateVDC', () => {
   });
 });
 
-describe('calculateLots', () => {
-  it('scales with equity and clamps to [0.01, cap]', () => {
-    expect(calculateLots(0)).toBe(0.01);
-    expect(calculateLots(-100)).toBe(0.01);
-    expect(calculateLots(100)).toBe(0.02);
-    expect(calculateLots(10_000)).toBe(0.05);
-    expect(calculateLots(10_000, 1)).toBe(1);
-    expect(calculateLots(Number.NaN)).toBe(0.01);
+describe('position sizing', () => {
+  it('uses a fixed 0.01 lot per signal', () => {
+    expect(BOT_LOT_SIZE).toBe(0.01);
+  });
+
+  it('derives concurrent slots as floor(equity / 20)', () => {
+    expect(maxOpenPositions(753.14)).toBe(37); // 37.657
+    expect(maxOpenPositions(20)).toBe(1);
+    expect(maxOpenPositions(39.99)).toBe(1);
+    expect(maxOpenPositions(19.99)).toBe(0);
+    expect(maxOpenPositions(0)).toBe(0);
+    expect(maxOpenPositions(-100)).toBe(0);
+    expect(maxOpenPositions(Number.NaN)).toBe(0);
+    expect(maxOpenPositions(Number.POSITIVE_INFINITY)).toBe(0);
   });
 });
 
