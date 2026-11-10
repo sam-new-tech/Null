@@ -47,10 +47,10 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Arm gate | Start only with a ready live account | Verified | `bot.tsx` disables Start unless `live.status === 'ready'`; start re-checks engine connection |
 | Lot sizing | Fixed 0.01 lots per signal | Verified | `BOT_LOT_SIZE` + test; every order sends exactly 0.01 |
 | Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); start dialog shows the cap |
-| Stoch trend tile | Bot screen shows StochRSI direction from K vs D: BULLISH / BEARISH / FLAT | Verified (manual) | `stochTrend()` in `bot.tsx`; colors use success/destructive. The numeric K/D tile was removed by request. Manual: compare the tile with the live K/D values in DevTools/engine state (K > D → BULLISH, K < D → BEARISH, equal/null → FLAT/—) |
+| Stoch trend tile | Bot screen shows StochRSI direction: BULLISH / BEARISH / FLAT, or NEUTRAL when K or D is at/beyond 80 or 20 | Verified (manual) | `stochTrend()` in `engine.ts` shared with the entry rule; tile maps it in `bot.tsx`. The numeric K/D tile was removed by request. Manual: K 85/D 70 → NEUTRAL, K 60/D 50 → BULLISH, K 40/D 55 → BEARISH |
 | Bot screen layout | Status tiles plus Stop; no Strategy Activity feed | Verified (manual) | Activity card removed from `bot.tsx` by request; the runner still records `status.logs` for diagnostics |
 | Indicators | 5m EMA(50) resampled, 1m Stochastic RSI/ADX/VDC | Verified | `engine.ts`; tests cover EMA alignment, StochRSI warm-up (RSI 14 → stoch 27 → K 35 → D 37) and 0–100 bounds, VDC sign/bounds, signal gating |
-| Signal rules | Long/short require price vs EMA, StochRSI K vs D, ADX > 25, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests; `evaluateAndTrade` enforces `maxOpenPositions` |
+| Signal rules | Long/short require price vs EMA, StochRSI K vs D inside 20–80, ADX > 25, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (overbought/oversold → neutral, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
 | Broker TP safety net | Amend position with TP after fill | Verified | `amendPositionSLTP` on fill; client tick loop remains the fallback |
@@ -78,7 +78,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 68 tests
+npm test -- --ci        # 8 suites, 72 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor

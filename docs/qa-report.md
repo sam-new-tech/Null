@@ -33,7 +33,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 68 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 72 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |

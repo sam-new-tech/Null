@@ -17,7 +17,8 @@ usable.
   Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25,
   VDC(20) beyond ±20%.
 - Entries: long when price > EMA and StochRSI K > D and ADX/VDC confirm;
-  short on the mirror condition (K < D).
+  short on the mirror condition (K < D). StochRSI is neutral — no entry — when
+  either K or D is overbought (≥ 80) or oversold (≤ 20).
 - Exit: fixed ±$2.00 take profit from entry, plus a broker-side TP as a
   safety net. Multiple managed positions can run at once.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
