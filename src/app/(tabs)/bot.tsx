@@ -16,7 +16,7 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
-import { BOT_LOT_SIZE, maxOpenPositions } from '@/lib/bot/engine';
+import { BOT_LOT_SIZE, maxOpenPositions, stochTrend, type StochTrend } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
@@ -54,14 +54,20 @@ const StatTile = memo(function StatTile({
   );
 });
 
-/** StochRSI direction from the K/D relationship used by the entry rule. */
-function stochTrend(k: number | null, d: number | null): { label: string; className: string } {
-  if (k === null || d === null || !Number.isFinite(k) || !Number.isFinite(d)) {
-    return { label: '—', className: '' };
+/** Presentation for the shared StochRSI trend state. */
+function stochTrendDisplay(trend: StochTrend | null): { label: string; className: string } {
+  switch (trend) {
+    case 'bullish':
+      return { label: 'BULLISH', className: 'text-success' };
+    case 'bearish':
+      return { label: 'BEARISH', className: 'text-destructive' };
+    case 'neutral':
+      return { label: 'NEUTRAL', className: 'text-warning' };
+    case 'flat':
+      return { label: 'FLAT', className: '' };
+    default:
+      return { label: '—', className: '' };
   }
-  if (k > d) return { label: 'BULLISH', className: 'text-success' };
-  if (k < d) return { label: 'BEARISH', className: 'text-destructive' };
-  return { label: 'FLAT', className: '' };
 }
 
 function LiveDot() {
@@ -132,7 +138,7 @@ export default function BotScreen() {
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
   const maxManaged = maxOpenPositions(equity);
-  const trend = stochTrend(status.indicators.stochK, status.indicators.stochD);
+  const trend = stochTrendDisplay(stochTrend(status.indicators.stochK, status.indicators.stochD));
   const gateMessage =
     live.status === 'error'
       ? (live.error ?? 'Connection failed — retry')

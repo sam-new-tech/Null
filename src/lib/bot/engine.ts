@@ -11,6 +11,7 @@
  * Signals:
  * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
  * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
+ * - StochRSI is neutral (no entry) when K or D is >= 80 or <= 20.
  *
  * Position Rules:
  * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
@@ -263,6 +264,29 @@ export function calculateStochRSI(
 }
 
 /**
+ * StochRSI bands matching TradingView's 20/50/80 guides. Either line in an
+ * extreme zone makes the trend NEUTRAL, regardless of K-vs-D order.
+ */
+export const STOCH_OVERBOUGHT = 80;
+export const STOCH_OVERSOLD = 20;
+
+export type StochTrend = 'bullish' | 'bearish' | 'flat' | 'neutral';
+
+/**
+ * Direction used by both the bot screen and the entry filter.
+ * Returns null while K/D are still warming up.
+ */
+export function stochTrend(k: number | null, d: number | null): StochTrend | null {
+  if (k === null || d === null || !Number.isFinite(k) || !Number.isFinite(d)) return null;
+  if (k >= STOCH_OVERBOUGHT || d >= STOCH_OVERBOUGHT || k <= STOCH_OVERSOLD || d <= STOCH_OVERSOLD) {
+    return 'neutral';
+  }
+  if (k > d) return 'bullish';
+  if (k < d) return 'bearish';
+  return 'flat';
+}
+
+/**
  * Calculate all indicators for the given 1m bars.
  * Returns an array of StrategyIndicators aligned with the input bars.
  */
@@ -368,14 +392,28 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     };
   }
 
-  const stochUp = ind.stochK > ind.stochD;
-  const stochDown = ind.stochK < ind.stochD;
+  const trend = stochTrend(ind.stochK, ind.stochD);
+
+  // Overbought/oversold on either line means no directional trend.
+  if (trend === 'neutral') {
+    return {
+      action: 'none',
+      price,
+      tp: 0,
+      ema5m: ind.ema5m,
+      stochK: ind.stochK,
+      stochD: ind.stochD,
+      adx: ind.adx,
+      vdc: ind.vdc,
+      reason: `StochRSI neutral: K ${ind.stochK.toFixed(1)} / D ${ind.stochD.toFixed(1)} is in the 20/80 zone`,
+    };
+  }
 
   // Long entry condition:
-  // price > ema AND stochK > stochD AND adx > 25.0 AND vdc > 20.0
+  // price > ema AND stochK > stochD (not overbought/oversold) AND adx > 25.0 AND vdc > 20.0
   if (
     price > ind.ema5m &&
-    stochUp &&
+    trend === 'bullish' &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     ind.vdc > STRATEGY_PARAMS.vdcThreshold
   ) {
@@ -393,10 +431,10 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
   }
 
   // Short entry condition:
-  // price < ema AND stochK < stochD AND adx > 25.0 AND vdc < -20.0
+  // price < ema AND stochK < stochD (not overbought/oversold) AND adx > 25.0 AND vdc < -20.0
   if (
     price < ind.ema5m &&
-    stochDown &&
+    trend === 'bearish' &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     ind.vdc < -STRATEGY_PARAMS.vdcThreshold
   ) {

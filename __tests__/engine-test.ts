@@ -7,6 +7,7 @@ import {
   evaluateSignal,
   maxOpenPositions,
   resample5mEMA,
+  stochTrend,
   type Bar,
   type StrategyIndicators,
 } from '@/lib/bot/engine';
@@ -155,6 +156,28 @@ describe('calculateStochRSI', () => {
   });
 });
 
+describe('stochTrend', () => {
+  it('is bullish or bearish inside the 20–80 band', () => {
+    expect(stochTrend(60, 50)).toBe('bullish');
+    expect(stochTrend(40, 55)).toBe('bearish');
+    expect(stochTrend(50, 50)).toBe('flat');
+  });
+
+  it('is neutral when either line is at or beyond 80/20', () => {
+    expect(stochTrend(85, 70)).toBe('neutral');
+    expect(stochTrend(70, 85)).toBe('neutral');
+    expect(stochTrend(10, 30)).toBe('neutral');
+    expect(stochTrend(30, 10)).toBe('neutral');
+    expect(stochTrend(80, 70)).toBe('neutral');
+    expect(stochTrend(20, 30)).toBe('neutral');
+  });
+
+  it('is null while warming up', () => {
+    expect(stochTrend(null, 50)).toBeNull();
+    expect(stochTrend(50, null)).toBeNull();
+  });
+});
+
 describe('evaluateSignal', () => {
   const bars = [makeBar(0, 100)];
 
@@ -175,6 +198,18 @@ describe('evaluateSignal', () => {
     expect(evaluateSignal(bars, [indicators({ adx: 25.1 })]).action).toBe('buy');
     expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('none');
     expect(evaluateSignal(bars, [indicators({ vdc: 0 })]).action).toBe('none');
+  });
+
+  it('blocks entries while StochRSI is overbought or oversold', () => {
+    const overbought = evaluateSignal(bars, [indicators({ stochK: 90, stochD: 85 })]);
+    expect(overbought.action).toBe('none');
+    expect(overbought.reason).toContain('StochRSI neutral');
+
+    const oversold = evaluateSignal(bars, [
+      indicators({ ema5m: 101, stochK: 10, stochD: 15, vdc: -25 }),
+    ]);
+    expect(oversold.action).toBe('none');
+    expect(oversold.reason).toContain('StochRSI neutral');
   });
 
   it('reports warming up while indicators are null', () => {
