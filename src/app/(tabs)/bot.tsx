@@ -229,7 +229,7 @@ export default function BotScreen() {
     );
   }
 
-  // Running: orb + live status + event logs + stop.
+  // Running: orb + live status + stop.
   return (
     <ScreenErrorBoundary key={live.status}>
       <View className="flex-1 bg-background">
@@ -285,42 +285,6 @@ export default function BotScreen() {
               }
             />
           </View>
-
-          {status.logs.length > 0 && (
-            <Card>
-              <GlassSheen />
-              <Card.Content className="gap-2 p-3">
-                <Text size="xs" muted className="uppercase tracking-widest font-semibold">
-                  Strategy Activity
-                </Text>
-                <View className="gap-1.5">
-                  {status.logs.slice(-5).reverse().map((entry, idx) => (
-                    <View key={idx} className="flex-row items-center justify-between gap-2">
-                      <Text size="xs" muted className="font-mono">
-                        {entry.time}
-                      </Text>
-                      <Text
-                        size="xs"
-                        className={`flex-1 font-mono ${
-                          entry.kind === 'signal'
-                            ? 'text-primary'
-                            : entry.kind === 'fill'
-                              ? 'text-success'
-                              : entry.kind === 'close'
-                                ? 'text-warning'
-                                : entry.kind === 'error'
-                                  ? 'text-destructive'
-                                  : ''
-                        }`}
-                        numberOfLines={1}>
-                        {entry.message}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </Card.Content>
-            </Card>
-          )}
 
           <Button variant="destructive" fullWidth disabled={stopping} loading={stopping} onPress={() => setConfirmStop(true)}>
             Stop bot
