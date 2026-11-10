@@ -45,15 +45,16 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Feature | Intended behaviour | Verdict | Evidence / gap |
 |---|---|---|---|
 | Arm gate | Start only with a ready live account | Verified | `bot.tsx` disables Start unless `live.status === 'ready'`; start re-checks engine connection |
-| Lot sizing | Equity-scaled, clamped to 0.01–0.05 | Verified | `calculateLots` + `engine-test.ts` clamp cases; dialog shows the same value as the order |
+| Lot sizing | Fixed 0.01 lots per signal | Verified | `BOT_LOT_SIZE` + test; every order sends exactly 0.01 |
+| Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); dialog and status tile show the cap |
 | Indicators | 5m EMA(50) resampled, 1m MACD/ADX/VDC | Verified | `engine.ts`; tests cover EMA alignment, VDC sign/bounds, signal gating |
-| Signal rules | Long/short require price vs EMA, MACD cross, ADX > 25, VDC ±20 | Verified | `evaluateSignal` + tests |
+| Signal rules | Long/short require price vs EMA, MACD cross, ADX > 25, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests; `evaluateAndTrade` enforces `maxOpenPositions` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
 | Broker TP safety net | Amend position with TP after fill | Verified | `amendPositionSLTP` on fill; client tick loop remains the fallback |
-| Client TP exit | Close at TP, retry if no confirmation | Fixed | `pendingCloseId` was sticky; now retries after `CLOSE_RETRY_MS` (15 s) |
+| Client TP exit | Close each position at TP, retry if no confirmation | Fixed | Per-position retry map (`CLOSE_RETRY_MS`, 15 s); closes every position whose TP is hit |
 | Close P/L log | Respect `moneyDigits` | Fixed | `runner.handleExecution` uses shared `money()` with `closePositionDetail.moneyDigits` |
-| Stop bot | Detach events, clear timer, close managed position, persist stopped | Verified | `stopAll()`; manual positions stay |
+| Stop bot | Detach events, clear timer, close all managed positions, persist stopped | Verified | `stopAll()` loops every managed position; manual trades stay |
 | Restart resume | A persisted `running` bot reattaches after relaunch/reconnect | Fixed | `BotRunner.resume()/resumeIfRunning()` reattaches events, ensures spots, restarts the 60 s timer and resyncs; called from `auth` restore/adopt and `bot.tsx` when the account becomes ready |
 | Background tick | Periodic reconcile while backgrounded | Partial | `background.ts` registers an OS task (~15 min minimum); foreground stream is the realtime path. OS throttling is documented |
 | Notifications | Notify on fills/closes | Fixed | `notify.ts` was dead code; now called on fill/close and permissions are requested on start. Best-effort and disabled in Expo Go/web |
@@ -75,7 +76,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 62 tests
+npm test -- --ci        # 8 suites, 63 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor
@@ -92,3 +93,6 @@ cd Context/gridbot && npx tsc --noEmit && npm test
    the safety net.
 5. **No component/E2E suite yet** — pure logic is covered; manual smoke checks are
    listed in `docs/qa-report.md`.
+6. **Slot cap is a count, not a margin check.** `floor(equity / 20)` can allow
+   more 0.01-lot positions than free margin supports at low leverage; the broker
+   will reject the excess orders. A margin-aware cap is a future hardening step.

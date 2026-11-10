@@ -18,8 +18,9 @@ usable.
 - Entries: long when price > EMA and MACD is bullish and ADX/VDC confirm;
   short on the mirror condition.
 - Exit: fixed ±$2.00 take profit from entry, plus a broker-side TP as a
-  safety net. One managed position at a time.
-- Sizing: equity-scaled lots clamped between 0.01 and 0.05.
+  safety net. Multiple managed positions can run at once.
+- Sizing: fixed 0.01 lots per signal. Concurrent position slots =
+  `floor(equity / $20)` (rounded down to a whole number).
 
 The grid/DCA experiments under `Context/gridbot` are a separate, legacy
 research sandbox and do **not** describe the shipped strategy.
