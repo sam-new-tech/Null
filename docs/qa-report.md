@@ -15,6 +15,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `dd2cdb4` | `refactor(app)`: shared `SideLabel`, `EmptyCard`, `useRefresh`, `isWeekendMarketClosed`, `formatIndicator`; fixed malformed formatting and JSX indentation; guarded positions-card early returns; widened indicator period types; typed Jest globals in tsconfig. |
 | `30528ef` | `refactor(ctrader)`: single `refreshSession()` token-rotation helper, single `toSymbolInfo()` mapper, single `adoptSession()` auth step. |
 | `c049fd3` | `fix(research)`: archived the removed grid engine as `legacy-app-engine.ts`, repointed the three stale scripts, fixed the stray `x` and the boolean row type. |
+| `6867b02` | `fix`: feature-verification pass — bulk close/cancel actions, banner state, bot resume, `ORDER_FILLED` fills, `moneyDigits` P/L, TP-close retry, notification wiring, mock volume, license key/randomness. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -26,7 +27,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 5 suites, 51 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 62 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |
@@ -53,12 +54,10 @@ results as legacy.
    runtime. Before release verify: login/deep-link flows, bot start/stop,
    TP amend and close confirmation, pull-to-refresh, license activation and
    relaunch re-verification.
-2. **`flattenAll` scope.** Trades → "Close all" on the Positions tab calls
-   `botRunner.flattenAll(..., 'positions')`, which currently closes only the
-   strategy-managed position; manual positions are untouched even though the
-   UI copy implies everything closes. This looks like a product/behaviour
-   bug, so it was not changed in a behavior-preserving refactor. Needs a
-   product decision and tests.
+2. **Bulk trade actions were fixed.** Trades → "Close all"/"Cancel all" now
+   send one request per row through `lib/trading/actions.ts` (previously only
+   the bot-managed position closed and order cancellation was a no-op). See
+   `docs/feature-verification.md`.
 3. **No component/E2E tests yet.** Recommended next step: React Native
    Testing Library for the row/dialog components and Maestro for the login →
    bot → close flow.
