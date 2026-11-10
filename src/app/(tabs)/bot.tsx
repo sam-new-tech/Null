@@ -28,7 +28,15 @@ import { isWeekendMarketClosed } from '@/lib/market-hours';
 import { Text } from 'panelui-native/primitives/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 
-const StatTile = memo(function StatTile({ label, value }: { label: string; value: string }) {
+const StatTile = memo(function StatTile({
+  label,
+  value,
+  valueClassName = '',
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
   return (
     <View style={{ flexBasis: '48%', flexGrow: 1 }}>
       <Card>
@@ -37,7 +45,7 @@ const StatTile = memo(function StatTile({ label, value }: { label: string; value
           <Text size="sm" muted className="uppercase tracking-widest">
             {label}
           </Text>
-          <Text size="xl" weight="bold" className="font-mono">
+          <Text size="xl" weight="bold" className={`font-mono ${valueClassName}`}>
             {value}
           </Text>
         </Card.Content>
@@ -45,6 +53,16 @@ const StatTile = memo(function StatTile({ label, value }: { label: string; value
     </View>
   );
 });
+
+/** StochRSI direction from the K/D relationship used by the entry rule. */
+function stochTrend(k: number | null, d: number | null): { label: string; className: string } {
+  if (k === null || d === null || !Number.isFinite(k) || !Number.isFinite(d)) {
+    return { label: '—', className: '' };
+  }
+  if (k > d) return { label: 'BULLISH', className: 'text-success' };
+  if (k < d) return { label: 'BEARISH', className: 'text-destructive' };
+  return { label: 'FLAT', className: '' };
+}
 
 function LiveDot() {
   const pulse = useSharedValue(1);
@@ -114,6 +132,7 @@ export default function BotScreen() {
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
   const maxManaged = maxOpenPositions(equity);
+  const trend = stochTrend(status.indicators.stochK, status.indicators.stochD);
   const gateMessage =
     live.status === 'error'
       ? (live.error ?? 'Connection failed — retry')
@@ -251,12 +270,9 @@ export default function BotScreen() {
           </View>
           <View className="flex-row flex-wrap gap-3">
             <StatTile
-              label="Position"
-              value={
-                status.openManaged === 0
-                  ? 'FLAT'
-                  : `${status.openManaged}/${status.maxManaged} · ${(status.openManaged * BOT_LOT_SIZE).toFixed(2)}L`
-              }
+              label="Stoch trend"
+              value={trend.label}
+              valueClassName={trend.className}
             />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile
