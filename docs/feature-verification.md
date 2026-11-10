@@ -48,6 +48,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Lot sizing | Fixed 0.01 lots per signal | Verified | `BOT_LOT_SIZE` + test; every order sends exactly 0.01 |
 | Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); start dialog shows the cap |
 | Stoch trend tile | Bot screen shows StochRSI direction from K vs D: BULLISH / BEARISH / FLAT | Verified (manual) | `stochTrend()` in `bot.tsx`; colors use success/destructive. The numeric K/D tile was removed by request. Manual: compare the tile with the live K/D values in DevTools/engine state (K > D → BULLISH, K < D → BEARISH, equal/null → FLAT/—) |
+| Bot screen layout | Status tiles plus Stop; no Strategy Activity feed | Verified (manual) | Activity card removed from `bot.tsx` by request; the runner still records `status.logs` for diagnostics |
 | Indicators | 5m EMA(50) resampled, 1m Stochastic RSI/ADX/VDC | Verified | `engine.ts`; tests cover EMA alignment, StochRSI warm-up (RSI 14 → stoch 27 → K 35 → D 37) and 0–100 bounds, VDC sign/bounds, signal gating |
 | Signal rules | Long/short require price vs EMA, StochRSI K vs D, ADX > 20, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests; `evaluateAndTrade` enforces `maxOpenPositions` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
