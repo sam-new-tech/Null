@@ -22,6 +22,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `c297a21` | `feat(bot)`: removed the K/D value tile and lowered the ADX(14) filter to strictly above 20. |
 | `1ff2ea9` | `revert(bot)`: restored the ADX(14) filter to strictly above 25 before the preview build. |
 | `8610650` | `feat(bot)`: StochRSI trend (and entries) become NEUTRAL while K or D is overbought/oversold (≥ 80 or ≤ 20). |
+| `2e9ac47` | `feat(bot)`: removed VDC from the strategy; signals now use EMA + StochRSI + ADX only. |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
