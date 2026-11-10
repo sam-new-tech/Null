@@ -47,8 +47,8 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Arm gate | Start only with a ready live account | Verified | `bot.tsx` disables Start unless `live.status === 'ready'`; start re-checks engine connection |
 | Lot sizing | Fixed 0.01 lots per signal | Verified | `BOT_LOT_SIZE` + test; every order sends exactly 0.01 |
 | Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); dialog and status tile show the cap |
-| Indicators | 5m EMA(50) resampled, 1m MACD/ADX/VDC | Verified | `engine.ts`; tests cover EMA alignment, VDC sign/bounds, signal gating |
-| Signal rules | Long/short require price vs EMA, MACD cross, ADX > 25, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests; `evaluateAndTrade` enforces `maxOpenPositions` |
+| Indicators | 5m EMA(50) resampled, 1m Stochastic RSI/ADX/VDC | Verified | `engine.ts`; tests cover EMA alignment, StochRSI warm-up (RSI 14 → stoch 27 → K 35 → D 37) and 0–100 bounds, VDC sign/bounds, signal gating |
+| Signal rules | Long/short require price vs EMA, StochRSI K vs D, ADX > 25, VDC ±20; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests; `evaluateAndTrade` enforces `maxOpenPositions` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
 | Broker TP safety net | Amend position with TP after fill | Verified | `amendPositionSLTP` on fill; client tick loop remains the fallback |
@@ -76,7 +76,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 63 tests
+npm test -- --ci        # 8 suites, 68 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor

@@ -17,6 +17,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `c049fd3` | `fix(research)`: archived the removed grid engine as `legacy-app-engine.ts`, repointed the three stale scripts, fixed the stray `x` and the boolean row type. |
 | `6867b02` | `fix`: feature-verification pass — bulk close/cancel actions, banner state, bot resume, `ORDER_FILLED` fills, `moneyDigits` P/L, TP-close retry, notification wiring, mock volume, license key/randomness. |
 | `78e69be` | `feat(bot)`: fixed 0.01-lot sizing and `floor(equity / 20)` concurrent position slots; multi-position fills, TPs and stop handling. |
+| `cc5300f` | `feat(bot)`: TradingView-style Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) replaces MACD; status tile and warm-up tests updated. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -28,7 +29,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 63 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 68 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |

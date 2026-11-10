@@ -13,10 +13,11 @@ usable.
 ## Strategy (what ships)
 
 - Instrument: XAU/USD, 1-minute bars.
-- Filters: 5-minute EMA(50) resampled from 1-minute closes, 1-minute
-  MACD(12, 26, 9), ADX(14) > 25, VDC(20) beyond ±20%.
-- Entries: long when price > EMA and MACD is bullish and ADX/VDC confirm;
-  short on the mirror condition.
+- Filters: 5-minute EMA(50) resampled from 1-minute closes,
+  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25,
+  VDC(20) beyond ±20%.
+- Entries: long when price > EMA and StochRSI K > D and ADX/VDC confirm;
+  short on the mirror condition (K < D).
 - Exit: fixed ±$2.00 take profit from entry, plus a broker-side TP as a
   safety net. Multiple managed positions can run at once.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
