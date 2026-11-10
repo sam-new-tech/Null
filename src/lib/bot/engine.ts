@@ -4,20 +4,20 @@
  * Implements the exact backtested quantitative strategy:
  * - Timeframe: 1-minute bars
  * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
- * - 1-minute MACD(12, 26, 9)
+ * - 1-minute Stochastic RSI (K=9, D=3, RSI=14, Stoch=14) — TradingView ta.stoch(ta.rsi(close,14)...)
  * - 1-minute ADX(14) (threshold: > 25.0)
  * - 1-minute VDC (Volume Delta Control, timeperiod=20, threshold=20.0, splitmode="candle")
  *
  * Signals:
- * - Long:  price > ema50_5m AND macd_line > macd_signal AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
- * - Short: price < ema50_5m AND macd_line < macd_signal AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
+ * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
+ * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
  *
  * Position Rules:
- * - Single managed position at a time (flat or in 1 trade).
+ * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
  * - Fixed $2.00 target on Gold from entry price.
  */
 
-import { ADX, EMA, MACD } from 'fast-technical-indicators';
+import { ADX, EMA } from 'fast-technical-indicators';
 
 export interface Bar {
   time: number;
@@ -30,9 +30,8 @@ export interface Bar {
 
 export interface StrategyIndicators {
   ema5m: number | null;
-  macdLine: number | null;
-  macdSignal: number | null;
-  macdHist: number | null;
+  stochK: number | null;
+  stochD: number | null;
   adx: number | null;
   vdc: number | null;
 }
@@ -42,8 +41,8 @@ export interface StrategySignal {
   price: number;
   tp: number;
   ema5m: number | null;
-  macdLine: number | null;
-  macdSignal: number | null;
+  stochK: number | null;
+  stochD: number | null;
   adx: number | null;
   vdc: number | null;
   reason: string;
@@ -55,9 +54,10 @@ export const STRATEGY_PARAMS = {
   vdcThreshold: 20.0,
   tpDelta: 2.0, // Fixed $2.00 gold profit target
   ema5mPeriod: 50,
-  macdFast: 12,
-  macdSlow: 26,
-  macdSignal: 9,
+  stochRsiRsiPeriod: 14,
+  stochRsiStochPeriod: 14,
+  stochRsiKPeriod: 9,
+  stochRsiDPeriod: 3,
   adxPeriod: 14,
   vdcPeriod: 20,
 } as const;
@@ -160,6 +160,109 @@ export function calculateVDC(
 }
 
 /**
+ * Wilder RSI matching TradingView `ta.rsi(close, period)`: the first value
+ * appears at index `period`, then gains/losses are RMA-smoothed.
+ */
+export function calculateRSI(values: number[], period = 14): (number | null)[] {
+  const n = values.length;
+  const out = new Array<number | null>(n).fill(null);
+  if (period <= 0 || n <= period) return out;
+
+  let gainSum = 0;
+  let lossSum = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = values[i] - values[i - 1];
+    if (diff > 0) gainSum += diff;
+    else lossSum -= diff;
+  }
+  let avgGain = gainSum / period;
+  let avgLoss = lossSum / period;
+  out[period] = rsiValue(avgGain, avgLoss);
+
+  for (let i = period + 1; i < n; i++) {
+    const diff = values[i] - values[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    out[i] = rsiValue(avgGain, avgLoss);
+  }
+  return out;
+}
+
+function rsiValue(avgGain: number, avgLoss: number): number {
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
+}
+
+/** SMA that keeps `null` gaps as `null` instead of coercing them to zero. */
+function smaNullable(values: (number | null)[], period: number): (number | null)[] {
+  const out = new Array<number | null>(values.length).fill(null);
+  if (period <= 0) return out;
+  for (let i = period - 1; i < values.length; i++) {
+    let sum = 0;
+    let complete = true;
+    for (let j = i - period + 1; j <= i; j++) {
+      const value = values[j];
+      if (value === null) {
+        complete = false;
+        break;
+      }
+      sum += value;
+    }
+    if (complete) out[i] = sum / period;
+  }
+  return out;
+}
+
+/**
+ * TradingView Pine equivalent:
+ *   rsi1 = ta.rsi(close, 14)
+ *   k = ta.sma(ta.stoch(rsi1, rsi1, rsi1, 14), 9)
+ *   d = ta.sma(k, 3)
+ *
+ * `ta.stoch` is called with the RSI series for source/high/low, so it measures
+ * where the current RSI sits inside its own 14-bar range.
+ */
+export function calculateStochRSI(
+  values: number[],
+  rsiPeriod = STRATEGY_PARAMS.stochRsiRsiPeriod,
+  stochPeriod = STRATEGY_PARAMS.stochRsiStochPeriod,
+  kPeriod = STRATEGY_PARAMS.stochRsiKPeriod,
+  dPeriod = STRATEGY_PARAMS.stochRsiDPeriod,
+): { rsi: (number | null)[]; stoch: (number | null)[]; k: (number | null)[]; d: (number | null)[] } {
+  const rsi = calculateRSI(values, rsiPeriod);
+  const stoch = new Array<number | null>(values.length).fill(null);
+
+  for (let i = 0; i < values.length; i++) {
+    const current = rsi[i];
+    if (current === null) continue;
+    const start = i - stochPeriod + 1;
+    if (start < 0) continue;
+
+    let highest = Number.NEGATIVE_INFINITY;
+    let lowest = Number.POSITIVE_INFINITY;
+    let complete = true;
+    for (let j = start; j <= i; j++) {
+      const value = rsi[j];
+      if (value === null) {
+        complete = false;
+        break;
+      }
+      if (value > highest) highest = value;
+      if (value < lowest) lowest = value;
+    }
+    if (!complete) continue;
+    stoch[i] = highest === lowest ? 0 : ((current - lowest) / (highest - lowest)) * 100;
+  }
+
+  const k = smaNullable(stoch, kPeriod);
+  const d = smaNullable(k, dPeriod);
+  return { rsi, stoch, k, d };
+}
+
+/**
  * Calculate all indicators for the given 1m bars.
  * Returns an array of StrategyIndicators aligned with the input bars.
  */
@@ -169,9 +272,8 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
   for (let i = 0; i < n; i++) {
     out[i] = {
       ema5m: null,
-      macdLine: null,
-      macdSignal: null,
-      macdHist: null,
+      stochK: null,
+      stochD: null,
       adx: null,
       vdc: null,
     };
@@ -191,28 +293,12 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
     out[i].vdc = vdcArray[i];
   }
 
-  // 3. 1m MACD(12, 26, 9)
+  // 3. 1m Stochastic RSI (K=9, D=3, RSI=14, Stoch=14)
   const closes1m = bars.map((b) => b.close);
-  if (n >= STRATEGY_PARAMS.macdSlow) {
-    const macdResults = MACD.calculate({
-      values: closes1m,
-      fastPeriod: STRATEGY_PARAMS.macdFast,
-      slowPeriod: STRATEGY_PARAMS.macdSlow,
-      signalPeriod: STRATEGY_PARAMS.macdSignal,
-      SimpleMAOscillator: false,
-      SimpleMASignal: false,
-    });
-
-    const macdOffset = STRATEGY_PARAMS.macdSlow - 1; // 25
-    for (let r = 0; r < macdResults.length; r++) {
-      const barIdx = r + macdOffset;
-      if (barIdx < n) {
-        const item = macdResults[r];
-        out[barIdx].macdLine = item.MACD ?? null;
-        out[barIdx].macdSignal = item.signal ?? null;
-        out[barIdx].macdHist = item.histogram ?? null;
-      }
-    }
+  const stochRsi = calculateStochRSI(closes1m);
+  for (let i = 0; i < n; i++) {
+    out[i].stochK = stochRsi.k[i];
+    out[i].stochD = stochRsi.d[i];
   }
 
   // 4. 1m ADX(14)
@@ -247,8 +333,8 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price: 0,
       tp: 0,
       ema5m: null,
-      macdLine: null,
-      macdSignal: null,
+      stochK: null,
+      stochD: null,
       adx: null,
       vdc: null,
       reason: 'No bars available',
@@ -264,8 +350,8 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
 
   if (
     ind.ema5m === null ||
-    ind.macdLine === null ||
-    ind.macdSignal === null ||
+    ind.stochK === null ||
+    ind.stochD === null ||
     ind.adx === null ||
     ind.vdc === null
   ) {
@@ -274,22 +360,22 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price,
       tp: 0,
       ema5m: ind.ema5m,
-      macdLine: ind.macdLine,
-      macdSignal: ind.macdSignal,
+      stochK: ind.stochK,
+      stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
       reason: 'Warming up indicators',
     };
   }
 
-  const macdUp = ind.macdLine > ind.macdSignal;
-  const macdDown = ind.macdLine < ind.macdSignal;
+  const stochUp = ind.stochK > ind.stochD;
+  const stochDown = ind.stochK < ind.stochD;
 
   // Long entry condition:
-  // price > ema AND macd_line > macd_signal AND adx > 25.0 AND vdc > 20.0
+  // price > ema AND stochK > stochD AND adx > 25.0 AND vdc > 20.0
   if (
     price > ind.ema5m &&
-    macdUp &&
+    stochUp &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     ind.vdc > STRATEGY_PARAMS.vdcThreshold
   ) {
@@ -298,19 +384,19 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price,
       tp: price + STRATEGY_PARAMS.tpDelta,
       ema5m: ind.ema5m,
-      macdLine: ind.macdLine,
-      macdSignal: ind.macdSignal,
+      stochK: ind.stochK,
+      stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bull && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
     };
   }
 
   // Short entry condition:
-  // price < ema AND macd_line < macd_signal AND adx > 25.0 AND vdc < -20.0
+  // price < ema AND stochK < stochD AND adx > 25.0 AND vdc < -20.0
   if (
     price < ind.ema5m &&
-    macdDown &&
+    stochDown &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     ind.vdc < -STRATEGY_PARAMS.vdcThreshold
   ) {
@@ -319,11 +405,11 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price,
       tp: price - STRATEGY_PARAMS.tpDelta,
       ema5m: ind.ema5m,
-      macdLine: ind.macdLine,
-      macdSignal: ind.macdSignal,
+      stochK: ind.stochK,
+      stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bear && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
     };
   }
 
@@ -332,8 +418,8 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     price,
     tp: 0,
     ema5m: ind.ema5m,
-    macdLine: ind.macdLine,
-    macdSignal: ind.macdSignal,
+    stochK: ind.stochK,
+    stochD: ind.stochD,
     adx: ind.adx,
     vdc: ind.vdc,
     reason: 'Waiting for signal criteria',

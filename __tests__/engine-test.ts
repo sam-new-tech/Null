@@ -1,6 +1,8 @@
 import {
   BOT_LOT_SIZE,
   calculateIndicators,
+  calculateRSI,
+  calculateStochRSI,
   calculateVDC,
   evaluateSignal,
   maxOpenPositions,
@@ -27,9 +29,8 @@ function makeBars(closes: number[]): Bar[] {
 function indicators(overrides: Partial<StrategyIndicators> = {}): StrategyIndicators {
   return {
     ema5m: 99,
-    macdLine: 1,
-    macdSignal: 0.5,
-    macdHist: 0.5,
+    stochK: 60,
+    stochD: 50,
     adx: 30,
     vdc: 25,
     ...overrides,
@@ -104,6 +105,56 @@ describe('position sizing', () => {
   });
 });
 
+describe('calculateRSI', () => {
+  it('matches Wilder alignment: first value at the period index', () => {
+    const values = Array.from({ length: 40 }, (_, i) => 100 + i);
+    const rsi = calculateRSI(values, 14);
+    expect(rsi[13]).toBeNull();
+    expect(rsi[14]).toBe(100);
+    expect(rsi.slice(15).every((value) => value !== null)).toBe(true);
+  });
+
+  it('returns 100 for all gains, 0 for all losses and 50 for a flat series', () => {
+    const gains = Array.from({ length: 30 }, (_, i) => 1 + i);
+    const losses = Array.from({ length: 30 }, (_, i) => 100 - i);
+    const flat = new Array(30).fill(100);
+    expect(calculateRSI(gains, 14)[14]).toBe(100);
+    expect(calculateRSI(losses, 14)[14]).toBe(0);
+    expect(calculateRSI(flat, 14)[14]).toBe(50);
+  });
+});
+
+describe('calculateStochRSI', () => {
+  // Zig-zag closes keep RSI varying so the stochastic range is non-zero.
+  const closes = Array.from({ length: 60 }, (_, i) => 100 + (i % 10) * 0.5);
+
+  it('warms up at the TradingView indices (RSI 14, stoch 27, K 35, D 37)', () => {
+    const result = calculateStochRSI(closes);
+    const firstIndex = (series: (number | null)[]) => series.findIndex((value) => value !== null);
+    expect(firstIndex(result.rsi)).toBe(14);
+    expect(firstIndex(result.stoch)).toBe(27);
+    expect(firstIndex(result.k)).toBe(35);
+    expect(firstIndex(result.d)).toBe(37);
+  });
+
+  it('keeps K and D inside the 0–100 band', () => {
+    const result = calculateStochRSI(closes);
+    for (const value of [...result.stoch, ...result.k, ...result.d]) {
+      if (value === null) continue;
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('exposes StochRSI K/D from calculateIndicators', () => {
+    const bars = makeBars(closes);
+    const indicators = calculateIndicators(bars);
+    expect(indicators[36].stochK).not.toBeNull();
+    expect(indicators[36].stochD).toBeNull();
+    expect(indicators[37].stochD).not.toBeNull();
+  });
+});
+
 describe('evaluateSignal', () => {
   const bars = [makeBar(0, 100)];
 
@@ -114,7 +165,7 @@ describe('evaluateSignal', () => {
 
   it('emits a short signal with a -2.00 target', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: 101, macdLine: 0.5, macdSignal: 1, vdc: -25 }),
+      indicators({ ema5m: 101, stochK: 40, stochD: 55, vdc: -25 }),
     ]);
     expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 98 });
   });
@@ -127,7 +178,7 @@ describe('evaluateSignal', () => {
 
   it('reports warming up while indicators are null', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: null, macdLine: null, macdSignal: null, adx: null, vdc: null }),
+      indicators({ ema5m: null, stochK: null, stochD: null, adx: null, vdc: null }),
     ]);
     expect(signal.action).toBe('none');
     expect(signal.reason).toBe('Warming up indicators');
