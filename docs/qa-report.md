@@ -20,6 +20,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `cc5300f` | `feat(bot)`: TradingView-style Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) replaces MACD; status tile and warm-up tests updated. |
 | `f633cae` | `feat(bot)`: bot screen now shows the StochRSI K-vs-D trend (BULLISH/BEARISH/FLAT) in place of the position count. |
 | `c297a21` | `feat(bot)`: removed the K/D value tile and lowered the ADX(14) filter to strictly above 20. |
+| `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
