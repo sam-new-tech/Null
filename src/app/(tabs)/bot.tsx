@@ -282,14 +282,6 @@ export default function BotScreen() {
             />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
-            <StatTile
-              label="VDC (20)"
-              value={
-                status.indicators.vdc === null || !Number.isFinite(status.indicators.vdc)
-                  ? '—'
-                  : `${status.indicators.vdc > 0 ? '+' : ''}${status.indicators.vdc.toFixed(1)}%`
-              }
-            />
           </View>
 
           <Button variant="destructive" fullWidth disabled={stopping} loading={stopping} onPress={() => setConfirmStop(true)}>

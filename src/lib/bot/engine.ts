@@ -6,11 +6,10 @@
  * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
  * - 1-minute Stochastic RSI (K=9, D=3, RSI=14, Stoch=14) — TradingView ta.stoch(ta.rsi(close,14)...)
  * - 1-minute ADX(14) (threshold: > 25.0)
- * - 1-minute VDC (Volume Delta Control, timeperiod=20, threshold=20.0, splitmode="candle")
  *
  * Signals:
- * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0 AND vdc > 20.0  -> Take Profit = price + 2.0
- * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 AND vdc < -20.0 -> Take Profit = price - 2.0
+ * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0  -> Take Profit = price + 2.0
+ * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 -> Take Profit = price - 2.0
  * - StochRSI is neutral (no entry) when K or D is >= 80 or <= 20.
  *
  * Position Rules:
@@ -34,7 +33,6 @@ export interface StrategyIndicators {
   stochK: number | null;
   stochD: number | null;
   adx: number | null;
-  vdc: number | null;
 }
 
 export interface StrategySignal {
@@ -45,14 +43,12 @@ export interface StrategySignal {
   stochK: number | null;
   stochD: number | null;
   adx: number | null;
-  vdc: number | null;
   reason: string;
 }
 
 export const STRATEGY_PARAMS = {
   symbol: 'XAUUSD',
   adxThreshold: 25.0,
-  vdcThreshold: 20.0,
   tpDelta: 2.0, // Fixed $2.00 gold profit target
   ema5mPeriod: 50,
   stochRsiRsiPeriod: 14,
@@ -60,7 +56,6 @@ export const STRATEGY_PARAMS = {
   stochRsiKPeriod: 9,
   stochRsiDPeriod: 3,
   adxPeriod: 14,
-  vdcPeriod: 20,
 } as const;
 
 /**
@@ -106,55 +101,6 @@ export function resample5mEMA(
       lastKnownEma = bucketEmaMap.get(completedKey)!;
     }
     out[i] = lastKnownEma;
-  }
-
-  return out;
-}
-
-/**
- * Compute Volume Delta Control (VDC) indicator.
- * Matches Pine Script / Python port `vdc.py` exactly (candle mode).
- *
- * bull_vol = volume if close >= open else 0.0
- * bear_vol = volume - bull_vol
- * delta = rolling_sum(bull_vol, 20) - rolling_sum(bear_vol, 20)
- * vdc = delta / rolling_sum(volume, 20) * 100
- */
-export function calculateVDC(
-  bars: Bar[],
-  period: number = STRATEGY_PARAMS.vdcPeriod,
-): (number | null)[] {
-  const n = bars.length;
-  const out = new Array<number | null>(n).fill(null);
-  if (n < period) return out;
-
-  let bullSum = 0;
-  let totalSum = 0;
-  const bullVol = new Float64Array(n);
-  const totalVol = new Float64Array(n);
-
-  for (let i = 0; i < n; i++) {
-    const b = bars[i];
-    const vol = Number.isFinite(b.volume) && b.volume > 0 ? b.volume : 0;
-    const isBull = b.close >= b.open;
-    const bv = isBull ? vol : 0.0;
-
-    bullVol[i] = bv;
-    totalVol[i] = vol;
-
-    bullSum += bv;
-    totalSum += vol;
-
-    if (i >= period) {
-      bullSum -= bullVol[i - period];
-      totalSum -= totalVol[i - period];
-    }
-
-    if (i >= period - 1) {
-      const bearSum = totalSum - bullSum;
-      const delta = bullSum - bearSum;
-      out[i] = totalSum > 0 ? (delta / totalSum) * 100.0 : 0.0;
-    }
   }
 
   return out;
@@ -299,7 +245,6 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
       stochK: null,
       stochD: null,
       adx: null,
-      vdc: null,
     };
   }
 
@@ -311,13 +256,7 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
     out[i].ema5m = ema5mArray[i];
   }
 
-  // 2. 1m VDC(20)
-  const vdcArray = calculateVDC(bars, STRATEGY_PARAMS.vdcPeriod);
-  for (let i = 0; i < n; i++) {
-    out[i].vdc = vdcArray[i];
-  }
-
-  // 3. 1m Stochastic RSI (K=9, D=3, RSI=14, Stoch=14)
+  // 2. 1m Stochastic RSI (K=9, D=3, RSI=14, Stoch=14)
   const closes1m = bars.map((b) => b.close);
   const stochRsi = calculateStochRSI(closes1m);
   for (let i = 0; i < n; i++) {
@@ -325,7 +264,7 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
     out[i].stochD = stochRsi.d[i];
   }
 
-  // 4. 1m ADX(14)
+  // 3. 1m ADX(14)
   if (n >= 28) {
     const adxResults = ADX.calculate({
       period: STRATEGY_PARAMS.adxPeriod,
@@ -360,7 +299,6 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochK: null,
       stochD: null,
       adx: null,
-      vdc: null,
       reason: 'No bars available',
     };
   }
@@ -376,8 +314,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     ind.ema5m === null ||
     ind.stochK === null ||
     ind.stochD === null ||
-    ind.adx === null ||
-    ind.vdc === null
+    ind.adx === null
   ) {
     return {
       action: 'none',
@@ -387,7 +324,6 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochK: ind.stochK,
       stochD: ind.stochD,
       adx: ind.adx,
-      vdc: ind.vdc,
       reason: 'Warming up indicators',
     };
   }
@@ -404,18 +340,16 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochK: ind.stochK,
       stochD: ind.stochD,
       adx: ind.adx,
-      vdc: ind.vdc,
       reason: `StochRSI neutral: K ${ind.stochK.toFixed(1)} / D ${ind.stochD.toFixed(1)} is in the 20/80 zone`,
     };
   }
 
   // Long entry condition:
-  // price > ema AND stochK > stochD (not overbought/oversold) AND adx > 25.0 AND vdc > 20.0
+  // price > ema AND stochK > stochD (not overbought/oversold) AND adx > 25.0
   if (
     price > ind.ema5m &&
     trend === 'bullish' &&
-    ind.adx > STRATEGY_PARAMS.adxThreshold &&
-    ind.vdc > STRATEGY_PARAMS.vdcThreshold
+    ind.adx > STRATEGY_PARAMS.adxThreshold
   ) {
     return {
       action: 'buy',
@@ -425,18 +359,16 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochK: ind.stochK,
       stochD: ind.stochD,
       adx: ind.adx,
-      vdc: ind.vdc,
-      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) > 20`,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25`,
     };
   }
 
   // Short entry condition:
-  // price < ema AND stochK < stochD (not overbought/oversold) AND adx > 25.0 AND vdc < -20.0
+  // price < ema AND stochK < stochD (not overbought/oversold) AND adx > 25.0
   if (
     price < ind.ema5m &&
     trend === 'bearish' &&
-    ind.adx > STRATEGY_PARAMS.adxThreshold &&
-    ind.vdc < -STRATEGY_PARAMS.vdcThreshold
+    ind.adx > STRATEGY_PARAMS.adxThreshold
   ) {
     return {
       action: 'sell',
@@ -446,8 +378,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochK: ind.stochK,
       stochD: ind.stochD,
       adx: ind.adx,
-      vdc: ind.vdc,
-      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) < -20`,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25`,
     };
   }
 
@@ -459,7 +390,6 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     stochK: ind.stochK,
     stochD: ind.stochD,
     adx: ind.adx,
-    vdc: ind.vdc,
     reason: 'Waiting for signal criteria',
   };
 }

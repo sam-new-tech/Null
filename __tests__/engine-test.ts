@@ -3,7 +3,6 @@ import {
   calculateIndicators,
   calculateRSI,
   calculateStochRSI,
-  calculateVDC,
   evaluateSignal,
   maxOpenPositions,
   resample5mEMA,
@@ -33,7 +32,6 @@ function indicators(overrides: Partial<StrategyIndicators> = {}): StrategyIndica
     stochK: 60,
     stochD: 50,
     adx: 30,
-    vdc: 25,
     ...overrides,
   };
 }
@@ -58,34 +56,6 @@ describe('resample5mEMA', () => {
 
   it('handles an empty series', () => {
     expect(resample5mEMA([])).toEqual([]);
-  });
-});
-
-describe('calculateVDC', () => {
-  it('computes bull/bear volume delta over the window', () => {
-    const bars: Bar[] = [
-      { ...makeBar(0, 101, 10), open: 100 },
-      { ...makeBar(1, 100, 20), open: 101 },
-      { ...makeBar(2, 102, 30), open: 100 },
-      { ...makeBar(3, 101, 40), open: 102 },
-    ];
-    const vdc = calculateVDC(bars, 3);
-
-    expect(vdc[0]).toBeNull();
-    expect(vdc[1]).toBeNull();
-    // Last 3: bull = 10 + 0 + 30 = 40, total = 60, delta = +20.
-    expect(vdc[2]).toBeCloseTo((20 / 60) * 100);
-    // Last 3: bull = 0 + 30 + 0 = 30, total = 90, delta = -30.
-    expect(vdc[3]).toBeCloseTo((-30 / 90) * 100);
-  });
-
-  it('returns zeros when there is no volume', () => {
-    const bars: Bar[] = [
-      { ...makeBar(0, 101, 0), open: 100 },
-      { ...makeBar(1, 100, 0), open: 101 },
-      { ...makeBar(2, 102, 0), open: 100 },
-    ];
-    expect(calculateVDC(bars, 3)[2]).toBe(0);
   });
 });
 
@@ -188,16 +158,14 @@ describe('evaluateSignal', () => {
 
   it('emits a short signal with a -2.00 target', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: 101, stochK: 40, stochD: 55, vdc: -25 }),
+      indicators({ ema5m: 101, stochK: 40, stochD: 55 }),
     ]);
     expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 98 });
   });
 
-  it('stays flat when a threshold is not strictly exceeded', () => {
+  it('stays flat when the ADX threshold is not strictly exceeded', () => {
     expect(evaluateSignal(bars, [indicators({ adx: 25 })]).action).toBe('none');
     expect(evaluateSignal(bars, [indicators({ adx: 25.1 })]).action).toBe('buy');
-    expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('none');
-    expect(evaluateSignal(bars, [indicators({ vdc: 0 })]).action).toBe('none');
   });
 
   it('blocks entries while StochRSI is overbought or oversold', () => {
@@ -206,7 +174,7 @@ describe('evaluateSignal', () => {
     expect(overbought.reason).toContain('StochRSI neutral');
 
     const oversold = evaluateSignal(bars, [
-      indicators({ ema5m: 101, stochK: 10, stochD: 15, vdc: -25 }),
+      indicators({ ema5m: 101, stochK: 10, stochD: 15 }),
     ]);
     expect(oversold.action).toBe('none');
     expect(oversold.reason).toContain('StochRSI neutral');
@@ -214,7 +182,7 @@ describe('evaluateSignal', () => {
 
   it('reports warming up while indicators are null', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: null, stochK: null, stochD: null, adx: null, vdc: null }),
+      indicators({ ema5m: null, stochK: null, stochD: null, adx: null }),
     ]);
     expect(signal.action).toBe('none');
     expect(signal.reason).toBe('Warming up indicators');
