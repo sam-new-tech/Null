@@ -24,6 +24,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `8610650` | `feat(bot)`: StochRSI trend (and entries) become NEUTRAL while K or D is overbought/oversold (≥ 80 or ≤ 20). |
 | `2e9ac47` | `feat(bot)`: removed VDC from the strategy; signals now use EMA + StochRSI + ADX only. |
 | `0004125` | `feat(bot)`: every entry gets TP = live price ± $2.50 (retried until the broker confirms, no stop loss). |
+| `b27ff53` | `fix(bot)`: adopt missed fills (bot-labelled broker positions) so no position is left without a TP. |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
