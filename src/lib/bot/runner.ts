@@ -8,6 +8,7 @@
  *   - 5m EMA(50) (resampled from 1m closes, forward-filled)
  *   - 1m Stochastic RSI (K 9, D 3, RSI 14, Stoch 14)
  *   - 1m ADX(14) > 25
+ *   - 1m Volume Delta Control(20): buyers >= +20%, sellers <= -20%
  * - Take Profit: live price at entry ± 2.5 (fixed $2.50 target on Gold)
  * - No stop loss is ever placed
  * - Fixed 0.01 lots, up to floor(equity / 20) concurrent positions.
@@ -153,6 +154,7 @@ export class BotRunner {
     stochK: null,
     stochD: null,
     adx: null,
+    vdc: null,
   };
 
   // Subscriptions & timers
@@ -513,7 +515,7 @@ export class BotRunner {
 
       this.log(
         'info',
-        `Strategy armed! 5mEMA: ${this.currentIndicators.ema5m?.toFixed(2) ?? '—'}, ADX: ${this.currentIndicators.adx?.toFixed(1) ?? '—'}`,
+        `Strategy armed! 5mEMA: ${this.currentIndicators.ema5m?.toFixed(2) ?? '—'}, ADX: ${this.currentIndicators.adx?.toFixed(1) ?? '—'}, VDC: ${this.currentIndicators.vdc?.toFixed(1) ?? '—'}%`,
       );
       if (this.currentIndicators.ema5m === null) {
         this.log(

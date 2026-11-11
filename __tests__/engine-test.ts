@@ -3,11 +3,13 @@ import {
   calculateIndicators,
   calculateRSI,
   calculateStochRSI,
+  calculateVDC,
   evaluateSignal,
   maxOpenPositions,
   resample5mEMA,
   stochTrend,
   takeProfitFor,
+  vdcControl,
   type Bar,
   type StrategyIndicators,
 } from '@/lib/bot/engine';
@@ -33,6 +35,7 @@ function indicators(overrides: Partial<StrategyIndicators> = {}): StrategyIndica
     stochK: 60,
     stochD: 50,
     adx: 30,
+    vdc: 25,
     ...overrides,
   };
 }
@@ -161,6 +164,57 @@ describe('takeProfitFor', () => {
   });
 });
 
+describe('calculateVDC', () => {
+  it('computes the candle-split control percentage', () => {
+    const bars: Bar[] = [
+      { ...makeBar(0, 101, 10), open: 100 },
+      { ...makeBar(1, 100, 20), open: 101 },
+      { ...makeBar(2, 102, 30), open: 100 },
+      { ...makeBar(3, 101, 40), open: 102 },
+    ];
+    const vdc = calculateVDC(bars, 3);
+
+    expect(vdc[0]).toBeNull();
+    expect(vdc[1]).toBeNull();
+    // Bars 0-2: bull = 10 + 0 + 30 = 40, total = 60, delta = +20.
+    expect(vdc[2]).toBeCloseTo((20 / 60) * 100);
+    // Bars 1-3: bull = 0 + 30 + 0 = 30, total = 90, delta = -30.
+    expect(vdc[3]).toBeCloseTo((-30 / 90) * 100);
+  });
+
+  it('splits volume by bar range in range mode', () => {
+    const bars: Bar[] = [
+      { time: 0, open: 100, high: 103, low: 99, close: 101, volume: 10 },
+      { time: 60_000, open: 101, high: 102, low: 100, close: 100, volume: 10 },
+    ];
+    // Bar 0: rng 4, close-low 2 -> bull 5. Bar 1: rng 2, close-low 0 -> bull 0.
+    const vdc = calculateVDC(bars, 2, 'range');
+    expect(vdc[0]).toBeNull();
+    // bull 5, bear 15 -> delta -10 over total 20 -> -50%.
+    expect(vdc[1]).toBeCloseTo(-50);
+  });
+
+  it('returns zero when there is no volume', () => {
+    const bars = [makeBar(0, 101, 0), makeBar(1, 100, 0), makeBar(2, 102, 0)];
+    expect(calculateVDC(bars, 3)[2]).toBe(0);
+  });
+});
+
+describe('vdcControl', () => {
+  it('is buyers/sellers at or beyond ±20 and neutral inside', () => {
+    expect(vdcControl(25)).toBe('buyers');
+    expect(vdcControl(20)).toBe('buyers');
+    expect(vdcControl(-20)).toBe('sellers');
+    expect(vdcControl(-25)).toBe('sellers');
+    expect(vdcControl(19.99)).toBe('neutral');
+    expect(vdcControl(-19.99)).toBe('neutral');
+  });
+
+  it('is null while warming up', () => {
+    expect(vdcControl(null)).toBeNull();
+  });
+});
+
 describe('evaluateSignal', () => {
   const bars = [makeBar(0, 100)];
 
@@ -171,7 +225,7 @@ describe('evaluateSignal', () => {
 
   it('emits a short signal with a -2.50 target', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: 101, stochK: 40, stochD: 55 }),
+      indicators({ ema5m: 101, stochK: 40, stochD: 55, vdc: -25 }),
     ]);
     expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 97.5 });
   });
@@ -179,6 +233,17 @@ describe('evaluateSignal', () => {
   it('stays flat when the ADX threshold is not strictly exceeded', () => {
     expect(evaluateSignal(bars, [indicators({ adx: 25 })]).action).toBe('none');
     expect(evaluateSignal(bars, [indicators({ adx: 25.1 })]).action).toBe('buy');
+  });
+
+  it('requires VDC to reach ±20 (inclusive, like the Pine script)', () => {
+    expect(evaluateSignal(bars, [indicators({ vdc: 19.99 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('buy');
+    expect(
+      evaluateSignal(bars, [indicators({ ema5m: 101, stochK: 40, stochD: 55, vdc: -20 })]).action,
+    ).toBe('sell');
+    expect(
+      evaluateSignal(bars, [indicators({ ema5m: 101, stochK: 40, stochD: 55, vdc: -19.99 })]).action,
+    ).toBe('none');
   });
 
   it('blocks entries while StochRSI is overbought or oversold', () => {
@@ -195,7 +260,7 @@ describe('evaluateSignal', () => {
 
   it('reports warming up while indicators are null', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: null, stochK: null, stochD: null, adx: null }),
+      indicators({ ema5m: null, stochK: null, stochD: null, adx: null, vdc: null }),
     ]);
     expect(signal.action).toBe('none');
     expect(signal.reason).toBe('Warming up indicators');

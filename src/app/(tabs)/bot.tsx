@@ -16,7 +16,7 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
-import { BOT_LOT_SIZE, maxOpenPositions, stochTrend, type StochTrend } from '@/lib/bot/engine';
+import { BOT_LOT_SIZE, maxOpenPositions, stochTrend, vdcControl, type StochTrend } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
@@ -67,6 +67,24 @@ function stochTrendDisplay(trend: StochTrend | null): { label: string; className
       return { label: 'FLAT', className: '' };
     default:
       return { label: '—', className: '' };
+  }
+}
+
+/** VDC percentage as shown on the Pine script's "Delta %" row. */
+function formatVdc(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '—';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+/** Colour the VDC tile by control state (BUYERS / SELLERS / NEUTRAL). */
+function vdcClass(value: number | null): string {
+  switch (vdcControl(value)) {
+    case 'buyers':
+      return 'text-success';
+    case 'sellers':
+      return 'text-destructive';
+    default:
+      return '';
   }
 }
 
@@ -282,6 +300,11 @@ export default function BotScreen() {
             />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
+            <StatTile
+              label="VDC (20)"
+              value={formatVdc(status.indicators.vdc)}
+              valueClassName={vdcClass(status.indicators.vdc)}
+            />
           </View>
 
           <Button variant="destructive" fullWidth disabled={stopping} loading={stopping} onPress={() => setConfirmStop(true)}>
