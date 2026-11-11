@@ -301,7 +301,7 @@ export default function BotScreen() {
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
             <StatTile
-              label="VDC (20)"
+              label="VDC (14)"
               value={formatVdc(status.indicators.vdc)}
               valueClassName={vdcClass(status.indicators.vdc)}
             />

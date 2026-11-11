@@ -5,12 +5,12 @@
  * - Timeframe: 1-minute bars
  * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
  * - 1-minute Stochastic RSI (K=9, D=3, RSI=14, Stoch=14) — TradingView ta.stoch(ta.rsi(close,14)...)
- * - 1-minute ADX(14) (threshold: > 25.0)
- * - 1-minute Volume Delta Control(20), candle split (BUYERS >= +20%, SELLERS <= -20%)
+ * - 1-minute ADX(14) (threshold: > 20.0)
+ * - 1-minute Volume Delta Control(14), candle split (BUYERS >= +20%, SELLERS <= -20%)
  *
  * Signals:
- * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0 AND VDC >= +20 -> TP = live price + 2.5
- * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 AND VDC <= -20 -> TP = live price - 2.5
+ * - Long:  price > ema50_5m AND stochK > stochD AND adx > 20.0 AND VDC >= +20 -> TP = live price + 2.5
+ * - Short: price < ema50_5m AND stochK < stochD AND adx > 20.0 AND VDC <= -20 -> TP = live price - 2.5
  * - StochRSI is neutral (no entry) when K or D is >= 80 or <= 20.
  *
  * Position Rules:
@@ -52,7 +52,7 @@ export interface StrategySignal {
 
 export const STRATEGY_PARAMS = {
   symbol: 'XAUUSD',
-  adxThreshold: 25.0,
+  adxThreshold: 20.0,
   vdcThreshold: 20.0,
   tpDelta: 2.5, // Fixed $2.50 gold profit target from the live entry price
   ema5mPeriod: 50,
@@ -61,7 +61,7 @@ export const STRATEGY_PARAMS = {
   stochRsiKPeriod: 9,
   stochRsiDPeriod: 3,
   adxPeriod: 14,
-  vdcPeriod: 20,
+  vdcPeriod: 14,
 } as const;
 
 /**
@@ -347,7 +347,7 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
     out[i].ema5m = ema5mArray[i];
   }
 
-  // 2. 1m Volume Delta Control (20), candle split
+  // 2. 1m Volume Delta Control (14), candle split
   const vdcArray = calculateVDC(bars, STRATEGY_PARAMS.vdcPeriod);
   for (let i = 0; i < n; i++) {
     out[i].vdc = vdcArray[i];
@@ -446,7 +446,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
   }
 
   // Long entry condition:
-  // price > ema AND stochK > stochD (not overbought/oversold) AND adx > 25.0 AND VDC >= +20
+  // price > ema AND stochK > stochD (not overbought/oversold) AND adx > 20.0 AND VDC >= +20
   if (
     price > ind.ema5m &&
     trend === 'bullish' &&
@@ -462,12 +462,12 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(+${ind.vdc.toFixed(1)}%) >= 20`,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bull (K ${ind.stochK.toFixed(1)} > D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(+${ind.vdc.toFixed(1)}%) >= 20`,
     };
   }
 
   // Short entry condition:
-  // price < ema AND stochK < stochD (not overbought/oversold) AND adx > 25.0 AND VDC <= -20
+  // price < ema AND stochK < stochD (not overbought/oversold) AND adx > 20.0 AND VDC <= -20
   if (
     price < ind.ema5m &&
     trend === 'bearish' &&
@@ -483,7 +483,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       stochD: ind.stochD,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 25 && VDC(${ind.vdc.toFixed(1)}%) <= -20`,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && StochRSI Bear (K ${ind.stochK.toFixed(1)} < D ${ind.stochD.toFixed(1)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(${ind.vdc.toFixed(1)}%) <= -20`,
     };
   }
 

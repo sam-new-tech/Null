@@ -231,8 +231,8 @@ describe('evaluateSignal', () => {
   });
 
   it('stays flat when the ADX threshold is not strictly exceeded', () => {
-    expect(evaluateSignal(bars, [indicators({ adx: 25 })]).action).toBe('none');
-    expect(evaluateSignal(bars, [indicators({ adx: 25.1 })]).action).toBe('buy');
+    expect(evaluateSignal(bars, [indicators({ adx: 20 })]).action).toBe('none');
+    expect(evaluateSignal(bars, [indicators({ adx: 20.1 })]).action).toBe('buy');
   });
 
   it('requires VDC to reach ±20 (inclusive, like the Pine script)', () => {
@@ -284,5 +284,11 @@ describe('calculateIndicators', () => {
 
   it('returns an empty array for no bars', () => {
     expect(calculateIndicators([])).toEqual([]);
+  });
+
+  it('uses the 14-bar VDC lookback', () => {
+    const result = calculateIndicators(makeBars(new Array(20).fill(2000)));
+    expect(result[12].vdc).toBeNull();
+    expect(result[13].vdc).not.toBeNull();
   });
 });
