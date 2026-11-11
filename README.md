@@ -14,9 +14,9 @@ usable.
 
 - Instrument: XAU/USD, 1-minute bars.
 - Filters: 5-minute EMA(50) resampled from 1-minute closes,
-  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 25, and
-  Volume Delta Control(20) with candle split (buyers ≥ +20%, sellers ≤ −20%).
-- Entries: long when price > EMA, StochRSI K > D, ADX > 25 and VDC is in the
+  Stochastic RSI (K 9, D 3, RSI 14, Stoch 14) on close, ADX(14) > 20, and
+  Volume Delta Control(14) with candle split (buyers ≥ +20%, sellers ≤ −20%).
+- Entries: long when price > EMA, StochRSI K > D, ADX > 20 and VDC is in the
   buyers zone; short on the mirror condition (K < D, VDC ≤ −20%). StochRSI is
   neutral — no entry — when either K or D is overbought (≥ 80) or oversold (≤ 20).
 - Exit: every entry gets a fixed **$2.50** take profit measured from the live

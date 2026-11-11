@@ -49,9 +49,9 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); start dialog shows the cap |
 | Stoch trend tile | Bot screen shows StochRSI direction: BULLISH / BEARISH / FLAT, or NEUTRAL when K or D is at/beyond 80 or 20 | Verified (manual) | `stochTrend()` in `engine.ts` shared with the entry rule; tile maps it in `bot.tsx`. The numeric K/D tile was removed by request. Manual: K 85/D 70 → NEUTRAL, K 60/D 50 → BULLISH, K 40/D 55 → BEARISH |
 | Bot screen layout | Status tiles plus Stop; no Strategy Activity feed | Verified (manual) | Activity card removed from `bot.tsx` by request; the runner still records `status.logs` for diagnostics |
-| Indicators | 5m EMA(50) resampled, 1m Stochastic RSI/ADX, 1m Volume Delta Control(20) | Verified | `engine.ts`; tests cover EMA alignment, StochRSI warm-up (RSI 14 → stoch 27 → K 35 → D 37) and 0–100 bounds, VDC candle/range math and ±20 bands, signal gating |
-| Signal rules | Long/short require price vs EMA, StochRSI K vs D inside 20–80, ADX > 25 and VDC ≥ +20% / ≤ −20%; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (overbought/oversold → neutral, VDC ±20 boundaries, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
-| VDC tile | Bot screen shows the VDC(20) control percentage, coloured green (buyers), red (sellers) or neutral | Verified (manual) | `calculateVDC()` + `vdcControl()` in `engine.ts` shared with the entry rule; tile renders `formatVdc`/`vdcClass` in `bot.tsx` |
+| Indicators | 5m EMA(50) resampled, 1m Stochastic RSI/ADX, 1m Volume Delta Control(14) | Verified | `engine.ts`; tests cover EMA alignment, StochRSI warm-up (RSI 14 → stoch 27 → K 35 → D 37) and 0–100 bounds, VDC candle/range math, the 14-bar lookback and ±20 bands, signal gating |
+| Signal rules | Long/short require price vs EMA, StochRSI K vs D inside 20–80, ADX > 20 and VDC ≥ +20% / ≤ −20%; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (overbought/oversold → neutral, ADX 20 boundary, VDC ±20 boundaries, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
+| VDC tile | Bot screen shows the VDC(14) control percentage, coloured green (buyers), red (sellers) or neutral | Verified (manual) | `calculateVDC()` + `vdcControl()` in `engine.ts` shared with the entry rule; tile renders `formatVdc`/`vdcClass` in `bot.tsx` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
 | Take profit size | Every entry gets TP = live price ± $2.50 | Verified | `takeProfitFor()` in `engine.ts` + tests; the runner anchors it to the live tick (fill price only as fallback) and rounds to symbol digits; no stop loss is ever sent |
@@ -80,7 +80,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 78 tests
+npm test -- --ci        # 8 suites, 79 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor
