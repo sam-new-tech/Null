@@ -53,7 +53,8 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Signal rules | Long/short require price vs EMA, StochRSI K vs D inside 20–80, ADX > 25; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (overbought/oversold → neutral, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
-| Broker TP safety net | Amend position with TP after fill | Verified | `amendPositionSLTP` on fill; client tick loop remains the fallback |
+| Take profit size | Every entry gets TP = live price ± $2.50 | Verified | `takeProfitFor()` in `engine.ts` + tests; the runner anchors it to the live tick (fill price only as fallback) and rounds to symbol digits; no stop loss is ever sent |
+| Broker TP safety net | Amend position with TP after fill, retry until confirmed | Verified | `applyBrokerTakeProfit` sends `amendPositionSLTP` (no SL), re-checks the broker position every 3 s up to 4 attempts; a 60 s sync also re-applies TP to any managed position missing one |
 | Client TP exit | Close each position at TP, retry if no confirmation | Fixed | Per-position retry map (`CLOSE_RETRY_MS`, 15 s); closes every position whose TP is hit |
 | Close P/L log | Respect `moneyDigits` | Fixed | `runner.handleExecution` uses shared `money()` with `closePositionDetail.moneyDigits` |
 | Stop bot | Detach events, clear timer, close all managed positions, persist stopped | Verified | `stopAll()` loops every managed position; manual trades stay |
@@ -78,7 +79,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 70 tests
+npm test -- --ci        # 8 suites, 72 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor

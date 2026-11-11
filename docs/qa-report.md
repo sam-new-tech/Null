@@ -23,6 +23,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `1ff2ea9` | `revert(bot)`: restored the ADX(14) filter to strictly above 25 before the preview build. |
 | `8610650` | `feat(bot)`: StochRSI trend (and entries) become NEUTRAL while K or D is overbought/oversold (≥ 80 or ≤ 20). |
 | `2e9ac47` | `feat(bot)`: removed VDC from the strategy; signals now use EMA + StochRSI + ADX only. |
+| `0004125` | `feat(bot)`: every entry gets TP = live price ± $2.50 (retried until the broker confirms, no stop loss). |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
@@ -35,7 +36,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 70 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 72 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |

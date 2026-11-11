@@ -18,8 +18,10 @@ usable.
 - Entries: long when price > EMA and StochRSI K > D and ADX confirms;
   short on the mirror condition (K < D). StochRSI is neutral — no entry — when
   either K or D is overbought (≥ 80) or oversold (≤ 20).
-- Exit: fixed ±$2.00 take profit from entry, plus a broker-side TP as a
-  safety net. Multiple managed positions can run at once.
+- Exit: every entry gets a fixed **$2.50** take profit measured from the live
+  price at entry (buy = live + 2.50, sell = live − 2.50). The TP is pushed to
+  the broker and retried until it is confirmed. There is **no stop loss**.
+  Multiple managed positions can run at once.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
   `floor(equity / $20)` (rounded down to a whole number).
 
