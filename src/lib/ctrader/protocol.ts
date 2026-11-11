@@ -79,7 +79,7 @@ export interface TraderInfo {
 
 export interface PositionInfo {
   positionId: number;
-  tradeData: { symbolId: number; volume: number; tradeSide: number; openTimestamp?: number };
+  tradeData: { symbolId: number; volume: number; tradeSide: number; openTimestamp?: number; label?: string };
   positionStatus: string;
   swap: number;
   price?: number;

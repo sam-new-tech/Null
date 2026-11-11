@@ -380,6 +380,7 @@ export class BotRunner {
 
   /** Re-apply TP to any managed position the broker shows without one. */
   private ensureBrokerTakeProfits(): void {
+    this.adoptMissedFills();
     if (this.persisted.positions.length === 0) return;
     const open = new Set(liveEngine.getSnapshot().positions.map((p) => Number(p.positionId)));
     for (const pos of this.persisted.positions) {
@@ -390,6 +391,45 @@ export class BotRunner {
       const brokerTp = this.brokerTakeProfit(pos.id);
       if (brokerTp !== null && Math.abs(brokerTp - pos.tp) < 0.05) continue;
       this.applyBrokerTakeProfit(pos);
+    }
+  }
+
+  /**
+   * Safety net for a missed fill event: adopt bot-labelled broker positions
+   * that the runner does not track yet, so they get their TP too.
+   */
+  private adoptMissedFills(): void {
+    if (this.persisted.state !== 'running') return;
+    for (const p of liveEngine.getSnapshot().positions) {
+      const label = p.tradeData?.label ?? '';
+      if (!label.startsWith(BOT_LABEL_PREFIX)) continue;
+      if (Number(p.tradeData?.symbolId) !== this.persisted.symbolId) continue;
+      const id = Number(p.positionId);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      if (this.persisted.positions.some((m) => m.id === id)) continue;
+
+      const side = asSide(p.tradeData.tradeSide);
+      const entry = toRealPrice(Number(p.price ?? 0)) || this.lastPrice || 0;
+      if (entry <= 0) continue;
+
+      const volume = Number(p.tradeData.volume ?? 0);
+      const lots = volume > 0 ? volume / (XAUUSD_UNITS_PER_LOT * 100) : BOT_LOT_SIZE;
+      const opened: ManagedPosition = {
+        id,
+        side,
+        entry,
+        tp: this.entryTakeProfit(side, entry),
+        volume,
+        lots: Math.max(BOT_LOT_SIZE, Math.round(lots * 100) / 100),
+        openedAt: Number(p.tradeData.openTimestamp ?? Date.now()),
+      };
+      this.persisted.positions = [...this.persisted.positions, opened];
+      this.log(
+        'fill',
+        `Recovered ${side.toUpperCase()} ${id} @ ${entry.toFixed(2)} (TP: ${opened.tp.toFixed(2)})`,
+      );
+      this.applyBrokerTakeProfit(opened);
+      void this.persist();
     }
   }
 
