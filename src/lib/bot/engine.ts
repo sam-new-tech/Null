@@ -8,13 +8,14 @@
  * - 1-minute ADX(14) (threshold: > 25.0)
  *
  * Signals:
- * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0  -> Take Profit = price + 2.0
- * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 -> Take Profit = price - 2.0
+ * - Long:  price > ema50_5m AND stochK > stochD AND adx > 25.0  -> Take Profit = live price + 2.5
+ * - Short: price < ema50_5m AND stochK < stochD AND adx > 25.0 -> Take Profit = live price - 2.5
  * - StochRSI is neutral (no entry) when K or D is >= 80 or <= 20.
  *
  * Position Rules:
  * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
- * - Fixed $2.00 target on Gold from entry price.
+ * - Every entry gets a fixed $2.50 take profit from the live price at entry.
+ * - No stop loss is ever placed.
  */
 
 import { ADX, EMA } from 'fast-technical-indicators';
@@ -49,7 +50,7 @@ export interface StrategySignal {
 export const STRATEGY_PARAMS = {
   symbol: 'XAUUSD',
   adxThreshold: 25.0,
-  tpDelta: 2.0, // Fixed $2.00 gold profit target
+  tpDelta: 2.5, // Fixed $2.50 gold profit target from the live entry price
   ema5mPeriod: 50,
   stochRsiRsiPeriod: 14,
   stochRsiStochPeriod: 14,
@@ -57,6 +58,18 @@ export const STRATEGY_PARAMS = {
   stochRsiDPeriod: 3,
   adxPeriod: 14,
 } as const;
+
+/**
+ * Absolute take profit for an entry: buy = price + $2.50, sell = price - $2.50.
+ * There is no stop loss anywhere in the strategy.
+ */
+export function takeProfitFor(
+  side: 'buy' | 'sell',
+  price: number,
+  delta: number = STRATEGY_PARAMS.tpDelta,
+): number {
+  return side === 'buy' ? price + delta : price - delta;
+}
 
 /**
  * Resample 1m bars into 5m closes matching pandas `resample('5min', label='right', closed='right').last()`.
@@ -354,7 +367,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     return {
       action: 'buy',
       price,
-      tp: price + STRATEGY_PARAMS.tpDelta,
+      tp: takeProfitFor('buy', price),
       ema5m: ind.ema5m,
       stochK: ind.stochK,
       stochD: ind.stochD,
@@ -373,7 +386,7 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     return {
       action: 'sell',
       price,
-      tp: price - STRATEGY_PARAMS.tpDelta,
+      tp: takeProfitFor('sell', price),
       ema5m: ind.ema5m,
       stochK: ind.stochK,
       stochD: ind.stochD,

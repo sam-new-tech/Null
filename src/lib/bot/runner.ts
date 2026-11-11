@@ -8,7 +8,8 @@
  *   - 5m EMA(50) (resampled from 1m closes, forward-filled)
  *   - 1m Stochastic RSI (K 9, D 3, RSI 14, Stoch 14)
  *   - 1m ADX(14) > 25
- * - Take Profit: Entry ± 2.0 (fixed $2.00 target on Gold)
+ * - Take Profit: live price at entry ± 2.5 (fixed $2.50 target on Gold)
+ * - No stop loss is ever placed
  * - Fixed 0.01 lots, up to floor(equity / 20) concurrent positions.
  */
 
@@ -32,6 +33,7 @@ import {
   evaluateSignal,
   maxOpenPositions,
   STRATEGY_PARAMS,
+  takeProfitFor,
   type Bar,
   type StrategyIndicators,
   type StrategySignal,
@@ -48,6 +50,9 @@ const BAR_COUNT = 600;
 const MIN_BARS = STRATEGY_PARAMS.ema5mPeriod * 5 + 5;
 /** Retry a TP close if no close deal confirms it within this window. */
 const CLOSE_RETRY_MS = 15_000;
+/** Broker TP amendments are re-sent until the position shows a take profit. */
+const TP_RETRY_MS = 3_000;
+const TP_MAX_ATTEMPTS = 4;
 const STATE_KEY = 'null_strategy_bot.state';
 const LOG_KEY = 'null_strategy_bot.logs';
 
@@ -109,6 +114,25 @@ function clockNow(): string {
   return new Date().toLocaleTimeString('en-GB');
 }
 
+/**
+ * Execution-event fill check. ProtoOAExecutionType ORDER_FILLED is 3 (the JSON
+ * transport usually sends the name), which is NOT the same as OrderStatus
+ * 2 = ORDER_STATUS_FILLED, so it must be checked separately.
+ */
+function isFillExecution(value: unknown): boolean {
+  return value === 'ORDER_FILLED' || value === 3 || value === '3';
+}
+
+/**
+ * Normalize a price from a response payload. cTrader's JSON gateway returns
+ * some prices as 1e5-scaled integers (spot quotes, trendbars); gold never
+ * trades above 100k, so anything larger is a scaled integer.
+ */
+function toRealPrice(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value > 100_000 ? value / 100_000 : value;
+}
+
 export class BotRunner {
   private persisted: PersistedState = { ...DEFAULT_PERSISTED };
   private listeners = new Set<() => void>();
@@ -138,6 +162,8 @@ export class BotRunner {
   private attached = false;
   /** Last close attempt per position id (retry gate for unconfirmed TPs). */
   private pendingCloseAt = new Map<number, number>();
+  /** Pending broker-TP verification timers per position id. */
+  private tpTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private pendingEntryTime = 0;
   /** Last bar timestamp that produced an entry — one entry per closed bar. */
   private lastEntryBarTime = 0;
@@ -220,16 +246,24 @@ export class BotRunner {
       if (raw) {
         const parsed = JSON.parse(raw) as LegacyPersistedState;
         const { position: legacyPosition, positions: storedPositions, ...rest } = parsed;
+        const stored = Array.isArray(storedPositions)
+          ? storedPositions
+          : legacyPosition
+            ? [legacyPosition]
+            : [];
+        const digits = Math.min(8, Math.max(0, typeof rest.digits === 'number' ? rest.digits : 2));
         this.persisted = {
           ...DEFAULT_PERSISTED,
           ...rest,
           // Sizing is fixed now; ignore pre-upgrade equity-scaled values.
           volumeLots: BOT_LOT_SIZE,
-          positions: Array.isArray(storedPositions)
-            ? storedPositions
-            : legacyPosition
-              ? [legacyPosition]
-              : [],
+          // Re-anchor every restored TP to entry ± 2.50 (older builds stored 2.00
+          // or, in the worst case, no TP at all).
+          positions: stored.map((p) =>
+            Number.isFinite(p.entry) && p.entry > 0
+              ? { ...p, tp: Number(takeProfitFor(p.side, p.entry).toFixed(digits)) }
+              : p,
+          ),
         };
       }
       const rawLogs = await storeGet(LOG_KEY);
@@ -265,6 +299,98 @@ export class BotRunner {
       if (s.symbolName === symbol) return id;
     }
     throw new Error(`Symbol ${symbol} not found`);
+  }
+
+  /** Symbol price digits (XAUUSD is usually 2). */
+  private symbolDigits(): number {
+    const info = liveEngine.getSnapshot().symbols.get(this.persisted.symbolId);
+    return info?.digits ?? this.persisted.digits ?? 2;
+  }
+
+  /**
+   * Take profit for a new entry, anchored to the live price so every fill gets
+   * one (buy = live + 2.50, sell = live - 2.50). The fill price is only a
+   * fallback when no tick is available.
+   */
+  private entryTakeProfit(side: 'buy' | 'sell', fillPrice: number): number {
+    const live = this.lastPrice;
+    let anchor = fillPrice;
+    if (live !== null && Number.isFinite(live) && live > 0) {
+      // Ignore a 1e5-scaled or otherwise mismatched fill price.
+      if (!(fillPrice > 0) || Math.abs(live - fillPrice) <= Math.max(10, live * 0.01)) {
+        anchor = live;
+      }
+    }
+    const digits = this.symbolDigits();
+    return Number(takeProfitFor(side, anchor).toFixed(digits));
+  }
+
+  /** Broker-side take profit for a position, normalized to a real price. */
+  private brokerTakeProfit(positionId: number): number | null {
+    const pos = liveEngine
+      .getSnapshot()
+      .positions.find((p) => Number(p.positionId) === positionId);
+    const raw = pos?.takeProfit;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return null;
+    return toRealPrice(raw);
+  }
+
+  /**
+   * Push the managed TP to the broker and verify it. cTrader sends no direct
+   * response for ProtoOAAmendPositionSLTPReq, so a short timer re-checks the
+   * position and retries (the amend is idempotent). No stop loss is ever sent.
+   */
+  private applyBrokerTakeProfit(pos: ManagedPosition, attempt = 0): void {
+    const existing = this.tpTimers.get(pos.id);
+    if (existing) clearTimeout(existing);
+
+    try {
+      const pair = amendPositionSLTP(this.accountId(), {
+        positionId: pos.id,
+        takeProfit: pos.tp,
+      });
+      liveEngine.execSend(pair.type, pair.payload);
+      if (attempt === 0) {
+        this.log('info', `TP ${pos.tp.toFixed(2)} set on position ${pos.id} (no stop loss)`);
+      }
+    } catch (err) {
+      this.log(
+        'error',
+        `TP amend failed for ${pos.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const timer = setTimeout(() => {
+      this.tpTimers.delete(pos.id);
+      if (this.persisted.state !== 'running') return;
+      if (!this.persisted.positions.some((p) => p.id === pos.id)) return;
+      const brokerTp = this.brokerTakeProfit(pos.id);
+      if (brokerTp !== null && Math.abs(brokerTp - pos.tp) < 0.05) return;
+      if (attempt + 1 >= TP_MAX_ATTEMPTS) {
+        this.log(
+          'error',
+          `Position ${pos.id} has no TP ${pos.tp.toFixed(2)} after ${TP_MAX_ATTEMPTS} attempts`,
+        );
+        return;
+      }
+      this.applyBrokerTakeProfit(pos, attempt + 1);
+    }, TP_RETRY_MS);
+    this.tpTimers.set(pos.id, timer);
+  }
+
+  /** Re-apply TP to any managed position the broker shows without one. */
+  private ensureBrokerTakeProfits(): void {
+    if (this.persisted.positions.length === 0) return;
+    const open = new Set(liveEngine.getSnapshot().positions.map((p) => Number(p.positionId)));
+    for (const pos of this.persisted.positions) {
+      // A stale snapshot right after a fill has no rows yet; only skip when the
+      // broker reports positions but not this one.
+      if (open.size > 0 && !open.has(pos.id)) continue;
+      if (this.tpTimers.has(pos.id)) continue;
+      const brokerTp = this.brokerTakeProfit(pos.id);
+      if (brokerTp !== null && Math.abs(brokerTp - pos.tp) < 0.05) continue;
+      this.applyBrokerTakeProfit(pos);
+    }
   }
 
   /**
@@ -386,6 +512,7 @@ export class BotRunner {
       void ensureNotifyPermissions();
     }
     await this.syncBars();
+    this.ensureBrokerTakeProfits();
     this.emit();
   }
 
@@ -430,6 +557,8 @@ export class BotRunner {
       this.persisted.state = 'stopped';
       this.persisted.startedAt = null;
       this.pendingCloseAt.clear();
+      for (const timer of this.tpTimers.values()) clearTimeout(timer);
+      this.tpTimers.clear();
       await this.persist();
       this.log('info', 'Bot stopped successfully');
     } finally {
@@ -564,9 +693,10 @@ export class BotRunner {
 
       this.lastEntryBarTime = barTime;
       this.pendingEntryTime = Date.now();
+      const previewTp = this.entryTakeProfit(signal.action, signal.price);
       this.log(
         'signal',
-        `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${BOT_LOT_SIZE} lots (${this.persisted.positions.length + 1}/${maxPositions}, TP: ${signal.tp.toFixed(2)})`,
+        `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${BOT_LOT_SIZE} lots (${this.persisted.positions.length + 1}/${maxPositions}, TP: ${previewTp.toFixed(2)})`,
       );
 
       try {
@@ -594,28 +724,27 @@ export class BotRunner {
     const position = payload.position as Record<string, unknown> | undefined;
 
     // 1. Order Fill -> Position Opened
-    if (isFilledStatus(order?.orderStatus) || isFilledStatus(payload.executionType)) {
+    if (isFilledStatus(order?.orderStatus) || isFillExecution(payload.executionType)) {
       const posId = Number(position?.positionId ?? deal?.positionId ?? order?.positionId);
-      const executionPrice = Number(deal?.executionPrice ?? this.lastPrice ?? 0);
+      const executionPrice = toRealPrice(Number(deal?.executionPrice ?? this.lastPrice ?? 0));
       const volume = Number(deal?.volume ?? position?.volume ?? 0);
       const side = asSide(order?.tradeSide ?? deal?.tradeSide);
 
       if (posId > 0 && executionPrice > 0 && !this.persisted.positions.some((p) => p.id === posId)) {
         const lots = volume > 0 ? volume / (XAUUSD_UNITS_PER_LOT * 100) : BOT_LOT_SIZE;
-        const tp = side === 'buy' ? executionPrice + STRATEGY_PARAMS.tpDelta : executionPrice - STRATEGY_PARAMS.tpDelta;
+        // Every entry gets a TP 2.50 away from the live price (no stop loss).
+        const tp = this.entryTakeProfit(side, executionPrice);
 
-        this.persisted.positions = [
-          ...this.persisted.positions,
-          {
-            id: posId,
-            side,
-            entry: executionPrice,
-            tp,
-            volume,
-            lots: Math.max(BOT_LOT_SIZE, Math.round(lots * 100) / 100),
-            openedAt: Date.now(),
-          },
-        ];
+        const opened: ManagedPosition = {
+          id: posId,
+          side,
+          entry: executionPrice,
+          tp,
+          volume,
+          lots: Math.max(BOT_LOT_SIZE, Math.round(lots * 100) / 100),
+          openedAt: Date.now(),
+        };
+        this.persisted.positions = [...this.persisted.positions, opened];
         this.pendingEntryTime = 0;
         this.pendingCloseAt.delete(posId);
 
@@ -628,16 +757,8 @@ export class BotRunner {
           `${side.toUpperCase()} ${this.persisted.symbol} @ ${executionPrice.toFixed(2)} (TP ${tp.toFixed(2)})`,
         );
 
-        // Register broker-side TP as safety net
-        try {
-          const tpPair = amendPositionSLTP(this.accountId(), {
-            positionId: posId,
-            takeProfit: tp,
-          });
-          liveEngine.execSend(tpPair.type, tpPair.payload);
-        } catch {
-          // Client-side tick monitoring covers exit
-        }
+        // Guarantee the TP reaches the broker: send + verify + retry.
+        this.applyBrokerTakeProfit(opened);
 
         void this.persist();
         this.emit();
@@ -686,6 +807,9 @@ export class BotRunner {
         const allInds = calculateIndicators(this.bars);
         this.currentIndicators = allInds[allInds.length - 1] ?? this.currentIndicators;
         this.emit();
+
+        // Any managed position the broker shows without a TP gets one again.
+        this.ensureBrokerTakeProfits();
 
         // Check entry condition on sync (evaluateAndTrade enforces the slot cap).
         this.evaluateAndTrade();

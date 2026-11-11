@@ -7,6 +7,7 @@ import {
   maxOpenPositions,
   resample5mEMA,
   stochTrend,
+  takeProfitFor,
   type Bar,
   type StrategyIndicators,
 } from '@/lib/bot/engine';
@@ -148,19 +149,31 @@ describe('stochTrend', () => {
   });
 });
 
+describe('takeProfitFor', () => {
+  it('puts the TP 2.50 away from the live price on both sides', () => {
+    expect(takeProfitFor('buy', 2000)).toBe(2002.5);
+    expect(takeProfitFor('sell', 2000)).toBe(1997.5);
+  });
+
+  it('accepts a custom distance', () => {
+    expect(takeProfitFor('buy', 100, 1)).toBe(101);
+    expect(takeProfitFor('sell', 100, 1)).toBe(99);
+  });
+});
+
 describe('evaluateSignal', () => {
   const bars = [makeBar(0, 100)];
 
-  it('emits a long signal with a +2.00 target', () => {
+  it('emits a long signal with a +2.50 target', () => {
     const signal = evaluateSignal(bars, [indicators()]);
-    expect(signal).toMatchObject({ action: 'buy', price: 100, tp: 102 });
+    expect(signal).toMatchObject({ action: 'buy', price: 100, tp: 102.5 });
   });
 
-  it('emits a short signal with a -2.00 target', () => {
+  it('emits a short signal with a -2.50 target', () => {
     const signal = evaluateSignal(bars, [
       indicators({ ema5m: 101, stochK: 40, stochD: 55 }),
     ]);
-    expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 98 });
+    expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 97.5 });
   });
 
   it('stays flat when the ADX threshold is not strictly exceeded', () => {

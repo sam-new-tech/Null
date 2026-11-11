@@ -212,7 +212,7 @@ export default function BotScreen() {
             <Dialog.Content>
               <Dialog.Title>Start Strategy</Dialog.Title>
               <Dialog.Description>
-                {`XAU/USD 1m Momentum Strategy · Fixed TP $2.00 target.\n${BOT_LOT_SIZE.toFixed(2)} lots per signal · up to ${maxManaged} concurrent positions from $${equity.toFixed(2)} equity.`}
+                {`XAU/USD 1m Momentum Strategy · Fixed TP $2.50 from live price, no stop loss.\n${BOT_LOT_SIZE.toFixed(2)} lots per signal · up to ${maxManaged} concurrent positions from $${equity.toFixed(2)} equity.`}
                 {weekend ? ' Weekend: rests at open.' : ''}
               </Dialog.Description>
               {startError ? (
