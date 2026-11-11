@@ -4,11 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { LogoMark } from '@/components/screen-header';
+import { useResponsive } from '@/hooks/use-responsive';
 import { NEEDS_MANUAL_LINK, redirectUri } from '@/lib/ctrader/config';
 import { useAuth } from '@/context/auth';
 import { Button } from 'panelui-native/components/button';
 import { Input } from 'panelui-native/components/input';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 import { Image } from 'expo-image';
 
 function codeFromPasted(text: string): string | null {
@@ -23,6 +24,7 @@ function codeFromPasted(text: string): string | null {
 }
 
 export default function LoginScreen() {
+  const { displayScale, isCompact } = useResponsive();
   const { login, busy, stage, error, connectWithCode } = useAuth();
   const [manual, setManual] = useState(NEEDS_MANUAL_LINK);
   const [pasted, setPasted] = useState('');
@@ -59,8 +61,8 @@ export default function LoginScreen() {
             <View className="flex-1 items-center justify-center bg-background">
               <ChartBackdrop />
               <View className="items-center gap-8 px-8" style={{ width: '100%', maxWidth: 340 }}>
-                <LogoMark size={120} />
-                <Text size="2xl" weight="bold" className="text-center">
+                <LogoMark size={Math.round(120 * displayScale)} />
+                <Text size={isCompact ? 'xl' : '2xl'} weight="bold" className="text-center">
                   Welcome to Null
                 </Text>
                 <Button

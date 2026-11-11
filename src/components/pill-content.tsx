@@ -16,11 +16,7 @@ export function PillContent({ tab }: { tab: TabMeta }) {
   const Icon = tab.Icon;
 
   return (
-    <View
-      style={[
-        styles.pill,
-        focused && { backgroundColor: colors.backgroundSelected },
-      ]}>
+    <View style={styles.pill}>
       <Icon size={22} color={focused ? colors.text : colors.textSecondary} />
       {focused && <Text style={[styles.label, { color: colors.text }]}>{tab.label}</Text>}
     </View>

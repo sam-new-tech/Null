@@ -1,4 +1,4 @@
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 /** BUY / SELL tag shared by position, order and history rows. */
 export function SideLabel({ side }: { side: 'buy' | 'sell' }) {

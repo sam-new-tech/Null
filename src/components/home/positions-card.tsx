@@ -11,7 +11,7 @@ import { Card } from 'panelui-native/components/card';
 import { EmptyCard } from '@/components/empty-card';
 import { GlassSheen } from '@/components/glass-sheen';
 import { SideLabel } from '@/components/side-label';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -60,7 +60,7 @@ function PositionRow({
           </Text>
         </View>
         <View className="flex-row items-center gap-2">
-          <Text weight="semibold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+          <Text weight="semibold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`} fit minimumFontScale={0.7} style={{ flexShrink: 1 }}>
             {formatMoney(position.pl)}
           </Text>
           <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}>

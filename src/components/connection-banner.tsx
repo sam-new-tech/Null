@@ -2,7 +2,7 @@ import { Pressable, View } from 'react-native';
 
 import { connectionBannerLabel } from '@/lib/connection-status';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 /**
  * Realtime connection banner. Purely event-driven:

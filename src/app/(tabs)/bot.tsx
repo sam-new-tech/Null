@@ -18,6 +18,7 @@ import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
 import { BOT_LOT_SIZE, maxOpenPositions, stochTrend, vdcControl, type StochTrend } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
+import { useResponsive } from '@/hooks/use-responsive';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
@@ -25,7 +26,7 @@ import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { GlassSheen } from '@/components/glass-sheen';
 import { formatIndicator, formatMoney, formatPrice } from '@/lib/format';
 import { isWeekendMarketClosed } from '@/lib/market-hours';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 
 const StatTile = memo(function StatTile({
@@ -45,7 +46,7 @@ const StatTile = memo(function StatTile({
           <Text size="sm" muted className="uppercase tracking-widest">
             {label}
           </Text>
-          <Text size="xl" weight="bold" className={`font-mono ${valueClassName}`}>
+          <Text size="xl" weight="bold" className={`font-mono ${valueClassName}`} fit minimumFontScale={0.7}>
             {value}
           </Text>
         </Card.Content>
@@ -114,7 +115,7 @@ function LivePL() {
   const pl = price === null ? 0 : botRunner.managedPlAt(price);
   const up = pl >= 0;
   return (
-    <Text size="3xl" weight="bold" numberOfLines={1} className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+    <Text size="3xl" weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`} fit>
       {formatMoney(pl)}
     </Text>
   );
@@ -123,7 +124,7 @@ function LivePL() {
 function LivePrice({ symbol }: { symbol: string }) {
   const price = useTickerPrice();
   return (
-    <Text size="3xl" weight="bold" numberOfLines={1} className="text-center font-mono">
+    <Text size="3xl" weight="bold" className="text-center font-mono" fit>
       {price === null ? '—' : formatPrice(symbol, price)}
     </Text>
   );
@@ -153,6 +154,7 @@ export default function BotScreen() {
   }, [live.status]);
 
   const running = status.state === 'running';
+  const { displayScale, isCompact } = useResponsive();
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
   const maxManaged = maxOpenPositions(equity);
@@ -206,26 +208,31 @@ export default function BotScreen() {
           <View className="gap-4 p-4">
             <ConnectionBanner />
           </View>
-          <View className="flex-1 items-center justify-center px-8" style={{ paddingBottom: TAB_CLEARANCE }}>
-            <View className="w-full items-center gap-5">
-              <LogoMark size={160} />
-              <Text
-                size="2xl"
-                weight="bold"
-                style={{ fontFamily: Fonts.rounded }}
-                className="text-center uppercase tracking-widest">
-                XAU/USD Momentum Bot
-              </Text>
-              <Button size="lg" fullWidth disabled={!canArm || starting} loading={starting} onPress={() => setSheetOpen(true)}>
-                Start bot
-              </Button>
+          <ScrollView
+            style={{ flex: 1, minHeight: 0 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: TAB_CLEARANCE }}
+            showsVerticalScrollIndicator={false}>
+            <View className="flex-1 items-center justify-center px-8 py-6">
+              <View className="w-full items-center gap-5">
+                <LogoMark size={Math.round(160 * displayScale)} />
+                <Text
+                  size={isCompact ? 'xl' : '2xl'}
+                  weight="bold"
+                  style={{ fontFamily: Fonts.rounded }}
+                  className="text-center uppercase tracking-widest">
+                  XAU/USD Momentum Bot
+                </Text>
+                <Button size="lg" fullWidth disabled={!canArm || starting} loading={starting} onPress={() => setSheetOpen(true)}>
+                  Start bot
+                </Button>
+              </View>
+              {!canArm && (
+                <Text size="sm" muted className="mt-3 text-center">
+                  {gateMessage}
+                </Text>
+              )}
             </View>
-            {!canArm && (
-              <Text size="sm" muted className="mt-3 text-center">
-                {gateMessage}
-              </Text>
-            )}
-          </View>
+          </ScrollView>
           <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
             <Dialog.Content>
               <Dialog.Title>Start Strategy</Dialog.Title>
@@ -271,8 +278,8 @@ export default function BotScreen() {
               }
             />
             <ConnectionBanner />
-            <View className="flex-row items-center justify-between px-2 py-1">
-              <View className="flex-1 items-start gap-1">
+            <View className="flex-row items-center justify-between gap-2 px-2 py-1">
+              <View className="flex-1 items-start gap-1" style={{ minWidth: 0 }}>
                 <Text size="sm" muted className="uppercase tracking-widest">
                   Live P/L
                 </Text>
@@ -280,12 +287,12 @@ export default function BotScreen() {
 
               </View>
               <View className="items-center gap-1">
-                <ThinkingOrb state="working" size={128} />
+                <ThinkingOrb state="working" size={Math.round(128 * displayScale)} />
                 <Text size="xs" muted className="text-center font-mono">
                   {status.symbol}
                 </Text>
               </View>
-              <View className="flex-1 items-end gap-1">
+              <View className="flex-1 items-end gap-1" style={{ minWidth: 0 }}>
                 <Text size="sm" muted className="uppercase tracking-widest">
                   Price
                 </Text>

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { View } from 'react-native';
 import { Image } from 'expo-image';
 
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 export function LogoMark({ size = 72 }: { size?: number }) {
   return (

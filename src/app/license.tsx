@@ -4,12 +4,14 @@ import { router } from 'expo-router';
 
 import { ChartBackdrop } from '@/components/home/chart-backdrop';
 import { LogoMark } from '@/components/screen-header';
+import { useResponsive } from '@/hooks/use-responsive';
 import { activateLicense } from '@/lib/license';
 import { Button } from 'panelui-native/components/button';
 import { Input } from 'panelui-native/components/input';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 export default function LicenseScreen() {
+  const { displayScale } = useResponsive();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +46,7 @@ export default function LicenseScreen() {
       <ChartBackdrop />
       <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         <View className="flex-1 items-center justify-center gap-6 px-8 py-10">
-          <LogoMark size={96} />
+          <LogoMark size={Math.round(96 * displayScale)} />
           <Text size="xl" weight="bold" className="text-center">
             Enter your license
           </Text>

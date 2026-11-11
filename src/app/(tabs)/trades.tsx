@@ -19,7 +19,7 @@ import { liveEngine } from '@/lib/ctrader/live';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { Dialog } from 'panelui-native/components/dialog';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 import { ChevronDownIcon } from 'panelui-native/icons';
 
 type Tab = 'positions' | 'orders';
@@ -148,7 +148,7 @@ export default function TradesScreen() {
                     <Text size="sm" muted className="uppercase tracking-widest">
                       Total floating
                     </Text>
-                    <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+                    <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`} fit>
                       {formatMoney(total)}
                     </Text>
                   </Card.Content>

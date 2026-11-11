@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
 import { GlassSheen } from '@/components/glass-sheen';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 interface Props {
   children: ReactNode;

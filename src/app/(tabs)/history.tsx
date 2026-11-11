@@ -15,7 +15,7 @@ import { useTrading } from '@/lib/trading/useTrading';
 import { liveEngine } from '@/lib/ctrader/live';
 import { Button } from 'panelui-native/components/button';
 import { Card } from 'panelui-native/components/card';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 const PAGE_SIZE = 7;
 
@@ -39,7 +39,10 @@ const HistoryRow = memo(function HistoryRow({
           </View>
           <Text
             weight="semibold"
-            className={`font-mono ${win ? 'text-success' : 'text-destructive'}`}>
+            className={`font-mono ${win ? 'text-success' : 'text-destructive'}`}
+            fit
+            minimumFontScale={0.7}
+            style={{ flexShrink: 1 }}>
             {formatMoney(t.pl)}
           </Text>
         </View>
@@ -96,7 +99,7 @@ export default function HistoryScreen() {
                 <Text size="sm" muted className="uppercase tracking-widest">
                   Total closed
                 </Text>
-                <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`}>
+                <Text weight="bold" className={`font-mono ${up ? 'text-success' : 'text-destructive'}`} fit>
                   {formatMoney(total)}
                 </Text>
               </Card.Content>

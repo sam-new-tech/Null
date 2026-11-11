@@ -16,7 +16,7 @@ import { Popover } from 'panelui-native/components/popover';
 import { TAB_CLEARANCE } from '@/constants/tabs';
 import { useRefresh } from '@/hooks/use-refresh';
 import { useTrading } from '@/lib/trading/useTrading';
-import { Text } from 'panelui-native/primitives/text';
+import { Text } from '@/components/text';
 
 function SectionLabel({ children }: { children: string }) {
   return (
