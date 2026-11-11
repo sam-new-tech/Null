@@ -25,6 +25,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `2e9ac47` | `feat(bot)`: removed VDC from the strategy; signals now use EMA + StochRSI + ADX only. |
 | `0004125` | `feat(bot)`: every entry gets TP = live price ± $2.50 (retried until the broker confirms, no stop loss). |
 | `b27ff53` | `fix(bot)`: adopt missed fills (bot-labelled broker positions) so no position is left without a TP. |
+| `b50a2e1` | `feat(bot)`: restored Volume Delta Control(20) as a filter — long needs VDC ≥ +20%, short needs ≤ −20% (Pine candle split). |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
 
 Documentation: replaced the stock Expo README, added
@@ -37,7 +38,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 72 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 78 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |
