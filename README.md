@@ -28,6 +28,8 @@ usable.
   book is flat.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
   `floor(equity / $20)` (rounded down to a whole number).
+- Notifications: entry fills play `assets/sounds/entry.wav` and closes play
+  `assets/sounds/exit.wav` (bundled through the `expo-notifications` plugin).
 
 The grid/DCA experiments under `Context/gridbot` are a separate, legacy
 research sandbox and do **not** describe the shipped strategy.

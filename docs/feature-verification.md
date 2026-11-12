@@ -63,7 +63,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Stop bot | Detach events, clear timer, close all managed positions, persist stopped | Verified | `stopAll()` loops every managed position; manual trades stay |
 | Restart resume | A persisted `running` bot reattaches after relaunch/reconnect | Fixed | `BotRunner.resume()/resumeIfRunning()` reattaches events, ensures spots, restarts the 60 s timer and resyncs; called from `auth` restore/adopt and `bot.tsx` when the account becomes ready |
 | Background tick | Periodic reconcile while backgrounded | Partial | `background.ts` registers an OS task (~15 min minimum); foreground stream is the realtime path. OS throttling is documented |
-| Notifications | Notify on fills/closes | Fixed | `notify.ts` was dead code; now called on fill/close and permissions are requested on start. Best-effort and disabled in Expo Go/web |
+| Notifications | Notify on fills/closes with bundled sounds | Fixed | `notify.ts` called on fill/close and permissions requested on start. Entry fills play `assets/sounds/entry.wav`, closes play `assets/sounds/exit.wav`; `expo-notifications` plugin bundles both and Android uses per-sound channels (`bot_entry`, `bot_exit`). Best-effort and disabled in Expo Go/web |
 | Activity log | Show recent strategy events | Verified | `runner.log()` persists the last 100 entries; `bot.tsx` renders the last 5 |
 | Dead status fields | Do not expose controls/fields that can never change | Fixed | Removed `coolingDown` (permanent false banner) and `restingCount` (always 0) |
 

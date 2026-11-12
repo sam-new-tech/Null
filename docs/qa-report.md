@@ -33,6 +33,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `6299419` | `feat(bot)`: added MACD(12, 26, 9) back as the trend filter — long needs line > signal, short needs line < signal; bot screen shows the MACD trend tile. |
 | `36f86a4` | `feat(ui)`: bot tiles renamed to Trend, EMA, Strength and Volume; ADX now reads WEAK/STRONG with a strict 20 threshold. |
 | `75f6f18` | `feat(bot)`: MACD side flip closes every managed trade and pauses entries until flat; flip tests added. |
+| `7ea5345` | `feat(notify)`: bundled custom sounds — entry fills play `entry.wav`, closes play `exit.wav`, with per-sound Android channels. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
