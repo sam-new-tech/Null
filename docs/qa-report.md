@@ -31,6 +31,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `f456e3f` | `feat(ui)`: responsive text scaling and fit-to-width money/price figures; scrollable bot idle screen; removed the active-tab background. |
 | `09fe618` | `feat(bot)`: removed the StochRSI indicator — signals now use EMA(50) 5m, ADX(14) > 20 and VDC(14) ±20 only; dropped the trend tile and its tests. |
 | `6299419` | `feat(bot)`: added MACD(12, 26, 9) back as the trend filter — long needs line > signal, short needs line < signal; bot screen shows the MACD trend tile. |
+| `36f86a4` | `feat(ui)`: bot tiles renamed to Trend, EMA, Strength and Volume; ADX now reads WEAK/STRONG with a strict 20 threshold. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -42,7 +43,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 74 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 76 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |
