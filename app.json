@@ -45,7 +45,12 @@
       ],
       "expo-secure-store",
       "expo-background-task",
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/sounds/entry.wav", "./assets/sounds/exit.wav"]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

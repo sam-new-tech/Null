@@ -864,6 +864,7 @@ export class BotRunner {
         void notify(
           'Bot filled',
           `${side.toUpperCase()} ${this.persisted.symbol} @ ${executionPrice.toFixed(2)} (TP ${tp.toFixed(2)})`,
+          'entry',
         );
 
         // Guarantee the TP reaches the broker: send + verify + retry.
@@ -896,6 +897,7 @@ export class BotRunner {
         void notify(
           'Bot closed',
           `${this.persisted.symbol} P/L ${grossProfit >= 0 ? '+' : ''}$${grossProfit.toFixed(2)}`,
+          'exit',
         );
 
         void this.persist();
