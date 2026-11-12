@@ -28,6 +28,8 @@ Spec: `docs/qa-refactor-spec.md`
 | `b50a2e1` | `feat(bot)`: restored Volume Delta Control(20) as a filter — long needs VDC ≥ +20%, short needs ≤ −20% (Pine candle split). |
 | `6521a77` | `feat(bot)`: VDC lookback 20 → 14 (threshold still ±20%) and ADX threshold 25 → 20 (strictly above). |
 | `465ee9a` | `feat(bot)`: removed the Strategy Activity feed from the bot screen. |
+| `f456e3f` | `feat(ui)`: responsive text scaling and fit-to-width money/price figures; scrollable bot idle screen; removed the active-tab background. |
+| `09fe618` | `feat(bot)`: removed the StochRSI indicator — signals now use EMA(50) 5m, ADX(14) > 20 and VDC(14) ±20 only; dropped the trend tile and its tests. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -39,7 +41,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 79 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 70 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |
