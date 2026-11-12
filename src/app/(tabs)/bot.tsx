@@ -16,7 +16,15 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
-import { BOT_LOT_SIZE, macdTrend, maxOpenPositions, vdcControl, type MacdTrend } from '@/lib/bot/engine';
+import {
+  adxStrength,
+  BOT_LOT_SIZE,
+  macdTrend,
+  maxOpenPositions,
+  vdcControl,
+  type AdxStrength,
+  type MacdTrend,
+} from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { useResponsive } from '@/hooks/use-responsive';
 import { Button } from 'panelui-native/components/button';
@@ -64,6 +72,18 @@ function macdTrendDisplay(trend: MacdTrend | null): { label: string; className: 
       return { label: 'BEARISH', className: 'text-destructive' };
     case 'flat':
       return { label: 'FLAT', className: '' };
+    default:
+      return { label: '—', className: '' };
+  }
+}
+
+/** Presentation for the ADX strength readout. */
+function strengthDisplay(value: AdxStrength | null): { label: string; className: string } {
+  switch (value) {
+    case 'strong':
+      return { label: 'STRONG', className: 'text-success' };
+    case 'weak':
+      return { label: 'WEAK', className: 'text-warning' };
     default:
       return { label: '—', className: '' };
   }
@@ -157,6 +177,7 @@ export default function BotScreen() {
   const equity = liveEngine.accountState().equity;
   const maxManaged = maxOpenPositions(equity);
   const trend = macdTrendDisplay(macdTrend(status.indicators.macdLine, status.indicators.macdSignal));
+  const strength = strengthDisplay(adxStrength(status.indicators.adx));
   const gateMessage =
     live.status === 'error'
       ? (live.error ?? 'Connection failed — retry')
@@ -298,11 +319,11 @@ export default function BotScreen() {
               </View>
           </View>
           <View className="flex-row flex-wrap gap-3">
-            <StatTile label="MACD trend" value={trend.label} valueClassName={trend.className} />
-            <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
-            <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
+            <StatTile label="Trend" value={trend.label} valueClassName={trend.className} />
+            <StatTile label="EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
+            <StatTile label="Strength" value={strength.label} valueClassName={strength.className} />
             <StatTile
-              label="VDC (14)"
+              label="Volume"
               value={formatVdc(status.indicators.vdc)}
               valueClassName={vdcClass(status.indicators.vdc)}
             />

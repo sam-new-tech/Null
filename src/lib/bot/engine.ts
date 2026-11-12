@@ -197,7 +197,6 @@ export function vdcControl(
 
 /** MACD direction used by both the bot screen and the entry filter. */
 export type MacdTrend = 'bullish' | 'bearish' | 'flat';
-
 /**
  * MACD trend from the line-vs-signal relationship. Returns null while either
  * line is still warming up.
@@ -209,6 +208,17 @@ export function macdTrend(line: number | null, signal: number | null): MacdTrend
   if (line > signal) return 'bullish';
   if (line < signal) return 'bearish';
   return 'flat';
+}
+
+/** ADX strength shown on the bot screen: strictly above the entry threshold is strong. */
+export type AdxStrength = 'weak' | 'strong';
+
+export function adxStrength(
+  value: number | null,
+  threshold: number = STRATEGY_PARAMS.adxThreshold,
+): AdxStrength | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return value > threshold ? 'strong' : 'weak';
 }
 
 /**

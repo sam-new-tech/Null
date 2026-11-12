@@ -1,4 +1,5 @@
 import {
+  adxStrength,
   BOT_LOT_SIZE,
   calculateIndicators,
   calculateVDC,
@@ -76,6 +77,18 @@ describe('position sizing', () => {
     expect(maxOpenPositions(-100)).toBe(0);
     expect(maxOpenPositions(Number.NaN)).toBe(0);
     expect(maxOpenPositions(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe('adxStrength', () => {
+  it('is strong only strictly above the ADX threshold', () => {
+    expect(adxStrength(20)).toBe('weak');
+    expect(adxStrength(20.1)).toBe('strong');
+    expect(adxStrength(45)).toBe('strong');
+  });
+
+  it('is null while warming up', () => {
+    expect(adxStrength(null)).toBeNull();
   });
 });
 
