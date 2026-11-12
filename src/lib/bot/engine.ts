@@ -4,12 +4,13 @@
  * Implements the exact backtested quantitative strategy:
  * - Timeframe: 1-minute bars
  * - 5-minute EMA(50) resampled from 1-minute closes (closed="right", label="right"), forward-filled
+ * - 1-minute MACD(12, 26, 9)
  * - 1-minute ADX(14) (threshold: > 20.0)
  * - 1-minute Volume Delta Control(14), candle split (BUYERS >= +20%, SELLERS <= -20%)
  *
  * Signals:
- * - Long:  price > ema50_5m AND adx > 20.0 AND VDC >= +20 -> TP = live price + 2.5
- * - Short: price < ema50_5m AND adx > 20.0 AND VDC <= -20 -> TP = live price - 2.5
+ * - Long:  price > ema50_5m AND macd_line > macd_signal AND adx > 20.0 AND VDC >= +20 -> TP = live price + 2.5
+ * - Short: price < ema50_5m AND macd_line < macd_signal AND adx > 20.0 AND VDC <= -20 -> TP = live price - 2.5
  *
  * Position Rules:
  * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
@@ -17,7 +18,7 @@
  * - No stop loss is ever placed.
  */
 
-import { ADX, EMA } from 'fast-technical-indicators';
+import { ADX, EMA, MACD } from 'fast-technical-indicators';
 
 export interface Bar {
   time: number;
@@ -30,6 +31,9 @@ export interface Bar {
 
 export interface StrategyIndicators {
   ema5m: number | null;
+  macdLine: number | null;
+  macdSignal: number | null;
+  macdHist: number | null;
   adx: number | null;
   vdc: number | null;
 }
@@ -39,6 +43,8 @@ export interface StrategySignal {
   price: number;
   tp: number;
   ema5m: number | null;
+  macdLine: number | null;
+  macdSignal: number | null;
   adx: number | null;
   vdc: number | null;
   reason: string;
@@ -50,6 +56,9 @@ export const STRATEGY_PARAMS = {
   vdcThreshold: 20.0,
   tpDelta: 2.5, // Fixed $2.50 gold profit target from the live entry price
   ema5mPeriod: 50,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignal: 9,
   adxPeriod: 14,
   vdcPeriod: 14,
 } as const;
@@ -186,6 +195,22 @@ export function vdcControl(
   return 'neutral';
 }
 
+/** MACD direction used by both the bot screen and the entry filter. */
+export type MacdTrend = 'bullish' | 'bearish' | 'flat';
+
+/**
+ * MACD trend from the line-vs-signal relationship. Returns null while either
+ * line is still warming up.
+ */
+export function macdTrend(line: number | null, signal: number | null): MacdTrend | null {
+  if (line === null || signal === null || !Number.isFinite(line) || !Number.isFinite(signal)) {
+    return null;
+  }
+  if (line > signal) return 'bullish';
+  if (line < signal) return 'bearish';
+  return 'flat';
+}
+
 /**
  * Calculate all indicators for the given 1m bars.
  * Returns an array of StrategyIndicators aligned with the input bars.
@@ -196,6 +221,9 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
   for (let i = 0; i < n; i++) {
     out[i] = {
       ema5m: null,
+      macdLine: null,
+      macdSignal: null,
+      macdHist: null,
       adx: null,
       vdc: null,
     };
@@ -215,13 +243,37 @@ export function calculateIndicators(bars: Bar[]): StrategyIndicators[] {
     out[i].vdc = vdcArray[i];
   }
 
-  // 3. 1m ADX(14)
+  // 3. 1m MACD(12, 26, 9)
+  const closes1m = bars.map((b) => b.close);
+  if (n >= STRATEGY_PARAMS.macdSlow) {
+    const macdResults = MACD.calculate({
+      values: closes1m,
+      fastPeriod: STRATEGY_PARAMS.macdFast,
+      slowPeriod: STRATEGY_PARAMS.macdSlow,
+      signalPeriod: STRATEGY_PARAMS.macdSignal,
+      SimpleMAOscillator: false,
+      SimpleMASignal: false,
+    });
+
+    const macdOffset = STRATEGY_PARAMS.macdSlow - 1;
+    for (let r = 0; r < macdResults.length; r++) {
+      const barIdx = r + macdOffset;
+      if (barIdx < n) {
+        const item = macdResults[r];
+        out[barIdx].macdLine = item.MACD ?? null;
+        out[barIdx].macdSignal = item.signal ?? null;
+        out[barIdx].macdHist = item.histogram ?? null;
+      }
+    }
+  }
+
+  // 4. 1m ADX(14)
   if (n >= 28) {
     const adxResults = ADX.calculate({
       period: STRATEGY_PARAMS.adxPeriod,
       high: bars.map((b) => b.high),
       low: bars.map((b) => b.low),
-      close: bars.map((b) => b.close),
+      close: closes1m,
     });
 
     // ADX has warm-up: 1 bar diff + (period - 1) wilder + (period - 1) SMA = 27 bars offset
@@ -247,6 +299,8 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price: 0,
       tp: 0,
       ema5m: null,
+      macdLine: null,
+      macdSignal: null,
       adx: null,
       vdc: null,
       reason: 'No bars available',
@@ -260,22 +314,34 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
   const indList = indicators ?? calculateIndicators(bars);
   const ind = indList[lastIdx];
 
-  if (ind.ema5m === null || ind.adx === null || ind.vdc === null) {
+  if (
+    ind.ema5m === null ||
+    ind.macdLine === null ||
+    ind.macdSignal === null ||
+    ind.adx === null ||
+    ind.vdc === null
+  ) {
     return {
       action: 'none',
       price,
       tp: 0,
       ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
       adx: ind.adx,
       vdc: ind.vdc,
       reason: 'Warming up indicators',
     };
   }
 
+  const macdUp = ind.macdLine > ind.macdSignal;
+  const macdDown = ind.macdLine < ind.macdSignal;
+
   // Long entry condition:
-  // price > ema AND adx > 20.0 AND VDC >= +20
+  // price > ema AND macd_line > macd_signal AND adx > 20.0 AND VDC >= +20
   if (
     price > ind.ema5m &&
+    macdUp &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     vdcControl(ind.vdc) === 'buyers'
   ) {
@@ -284,16 +350,19 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price,
       tp: takeProfitFor('buy', price),
       ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(+${ind.vdc.toFixed(1)}%) >= 20`,
+      reason: `Long: Price(${price.toFixed(2)}) > EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bull && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(+${ind.vdc.toFixed(1)}%) >= 20`,
     };
   }
 
   // Short entry condition:
-  // price < ema AND adx > 20.0 AND VDC <= -20
+  // price < ema AND macd_line < macd_signal AND adx > 20.0 AND VDC <= -20
   if (
     price < ind.ema5m &&
+    macdDown &&
     ind.adx > STRATEGY_PARAMS.adxThreshold &&
     vdcControl(ind.vdc) === 'sellers'
   ) {
@@ -302,9 +371,11 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
       price,
       tp: takeProfitFor('sell', price),
       ema5m: ind.ema5m,
+      macdLine: ind.macdLine,
+      macdSignal: ind.macdSignal,
       adx: ind.adx,
       vdc: ind.vdc,
-      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(${ind.vdc.toFixed(1)}%) <= -20`,
+      reason: `Short: Price(${price.toFixed(2)}) < EMA5m(${ind.ema5m.toFixed(2)}) && MACD Bear && ADX(${ind.adx.toFixed(1)}) > 20 && VDC(${ind.vdc.toFixed(1)}%) <= -20`,
     };
   }
 
@@ -313,6 +384,8 @@ export function evaluateSignal(bars: Bar[], indicators?: StrategyIndicators[]): 
     price,
     tp: 0,
     ema5m: ind.ema5m,
+    macdLine: ind.macdLine,
+    macdSignal: ind.macdSignal,
     adx: ind.adx,
     vdc: ind.vdc,
     reason: 'Waiting for signal criteria',

@@ -3,6 +3,7 @@ import {
   calculateIndicators,
   calculateVDC,
   evaluateSignal,
+  macdTrend,
   maxOpenPositions,
   resample5mEMA,
   takeProfitFor,
@@ -29,6 +30,9 @@ function makeBars(closes: number[]): Bar[] {
 function indicators(overrides: Partial<StrategyIndicators> = {}): StrategyIndicators {
   return {
     ema5m: 99,
+    macdLine: 1,
+    macdSignal: 0.5,
+    macdHist: 0.5,
     adx: 30,
     vdc: 25,
     ...overrides,
@@ -72,6 +76,19 @@ describe('position sizing', () => {
     expect(maxOpenPositions(-100)).toBe(0);
     expect(maxOpenPositions(Number.NaN)).toBe(0);
     expect(maxOpenPositions(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe('macdTrend', () => {
+  it('is bullish or bearish from the line-vs-signal order', () => {
+    expect(macdTrend(1, 0.5)).toBe('bullish');
+    expect(macdTrend(0.5, 1)).toBe('bearish');
+    expect(macdTrend(1, 1)).toBe('flat');
+  });
+
+  it('is null while either line is warming up', () => {
+    expect(macdTrend(null, 0.5)).toBeNull();
+    expect(macdTrend(0.5, null)).toBeNull();
   });
 });
 
@@ -147,7 +164,9 @@ describe('evaluateSignal', () => {
   });
 
   it('emits a short signal with a -2.50 target', () => {
-    const signal = evaluateSignal(bars, [indicators({ ema5m: 101, vdc: -25 })]);
+    const signal = evaluateSignal(bars, [
+      indicators({ ema5m: 101, macdLine: 0.5, macdSignal: 1, vdc: -25 }),
+    ]);
     expect(signal).toMatchObject({ action: 'sell', price: 100, tp: 97.5 });
   });
 
@@ -156,20 +175,31 @@ describe('evaluateSignal', () => {
     expect(evaluateSignal(bars, [indicators({ adx: 20.1 })]).action).toBe('buy');
   });
 
+  it('requires MACD line vs signal for direction', () => {
+    // Price is above EMA, but MACD is bearish -> no long.
+    expect(evaluateSignal(bars, [indicators({ macdLine: 0.5, macdSignal: 1 })]).action).toBe('none');
+    // Price is below EMA, but MACD is bullish -> no short.
+    expect(
+      evaluateSignal(bars, [indicators({ ema5m: 101, macdLine: 1, macdSignal: 0.5, vdc: -25 })]).action,
+    ).toBe('none');
+    // A flat MACD gives no direction.
+    expect(evaluateSignal(bars, [indicators({ macdLine: 1, macdSignal: 1 })]).action).toBe('none');
+  });
+
   it('requires VDC to reach ±20 (inclusive, like the Pine script)', () => {
     expect(evaluateSignal(bars, [indicators({ vdc: 19.99 })]).action).toBe('none');
     expect(evaluateSignal(bars, [indicators({ vdc: 20 })]).action).toBe('buy');
     expect(
-      evaluateSignal(bars, [indicators({ ema5m: 101, vdc: -20 })]).action,
+      evaluateSignal(bars, [indicators({ ema5m: 101, macdLine: 0.5, macdSignal: 1, vdc: -20 })]).action,
     ).toBe('sell');
     expect(
-      evaluateSignal(bars, [indicators({ ema5m: 101, vdc: -19.99 })]).action,
+      evaluateSignal(bars, [indicators({ ema5m: 101, macdLine: 0.5, macdSignal: 1, vdc: -19.99 })]).action,
     ).toBe('none');
   });
 
   it('reports warming up while indicators are null', () => {
     const signal = evaluateSignal(bars, [
-      indicators({ ema5m: null, adx: null, vdc: null }),
+      indicators({ ema5m: null, macdLine: null, macdSignal: null, adx: null, vdc: null }),
     ]);
     expect(signal.action).toBe('none');
     expect(signal.reason).toBe('Warming up indicators');
@@ -199,5 +229,12 @@ describe('calculateIndicators', () => {
     const result = calculateIndicators(makeBars(new Array(20).fill(2000)));
     expect(result[12].vdc).toBeNull();
     expect(result[13].vdc).not.toBeNull();
+  });
+
+  it('aligns MACD line and signal after their warm-up', () => {
+    const result = calculateIndicators(makeBars(new Array(60).fill(2000)));
+    expect(result[24].macdLine).toBeNull();
+    expect(result[25].macdLine).not.toBeNull();
+    expect(result[40].macdSignal).not.toBeNull();
   });
 });

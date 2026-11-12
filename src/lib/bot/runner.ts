@@ -6,6 +6,7 @@
  * - Timeframe: 1-minute bars
  * - Indicators:
  *   - 5m EMA(50) (resampled from 1m closes, forward-filled)
+ *   - 1m MACD(12, 26, 9)
  *   - 1m ADX(14) > 20
  *   - 1m Volume Delta Control(14): buyers >= +20%, sellers <= -20%
  * - Take Profit: live price at entry ± 2.5 (fixed $2.50 target on Gold)
@@ -150,6 +151,9 @@ export class BotRunner {
   private formingBar: Bar | null = null;
   private currentIndicators: StrategyIndicators = {
     ema5m: null,
+    macdLine: null,
+    macdSignal: null,
+    macdHist: null,
     adx: null,
     vdc: null,
   };
