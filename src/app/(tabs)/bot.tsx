@@ -16,7 +16,7 @@ import { TAB_CLEARANCE } from '@/constants/tabs';
 import { Fonts } from '@/constants/theme';
 import { liveEngine, useLive } from '@/lib/ctrader/live';
 import { botRunner } from '@/lib/bot/runner';
-import { BOT_LOT_SIZE, maxOpenPositions, stochTrend, vdcControl, type StochTrend } from '@/lib/bot/engine';
+import { BOT_LOT_SIZE, maxOpenPositions, vdcControl } from '@/lib/bot/engine';
 import { registerGridTask, unregisterGridTask } from '@/lib/bot/background';
 import { useResponsive } from '@/hooks/use-responsive';
 import { Button } from 'panelui-native/components/button';
@@ -54,22 +54,6 @@ const StatTile = memo(function StatTile({
     </View>
   );
 });
-
-/** Presentation for the shared StochRSI trend state. */
-function stochTrendDisplay(trend: StochTrend | null): { label: string; className: string } {
-  switch (trend) {
-    case 'bullish':
-      return { label: 'BULLISH', className: 'text-success' };
-    case 'bearish':
-      return { label: 'BEARISH', className: 'text-destructive' };
-    case 'neutral':
-      return { label: 'NEUTRAL', className: 'text-warning' };
-    case 'flat':
-      return { label: 'FLAT', className: '' };
-    default:
-      return { label: '—', className: '' };
-  }
-}
 
 /** VDC percentage as shown on the Pine script's "Delta %" row. */
 function formatVdc(value: number | null): string {
@@ -158,7 +142,6 @@ export default function BotScreen() {
   const canArm = live.status === 'ready' && live.trader !== null;
   const equity = liveEngine.accountState().equity;
   const maxManaged = maxOpenPositions(equity);
-  const trend = stochTrendDisplay(stochTrend(status.indicators.stochK, status.indicators.stochD));
   const gateMessage =
     live.status === 'error'
       ? (live.error ?? 'Connection failed — retry')
@@ -300,11 +283,6 @@ export default function BotScreen() {
               </View>
           </View>
           <View className="flex-row flex-wrap gap-3">
-            <StatTile
-              label="Stoch trend"
-              value={trend.label}
-              valueClassName={trend.className}
-            />
             <StatTile label="5m EMA" value={formatIndicator(status.indicators.ema5m, 2)} />
             <StatTile label="ADX (14)" value={formatIndicator(status.indicators.adx, 1)} />
             <StatTile
