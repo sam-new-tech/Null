@@ -4,6 +4,7 @@ import {
   calculateIndicators,
   calculateVDC,
   evaluateSignal,
+  isMacdFlip,
   macdTrend,
   maxOpenPositions,
   resample5mEMA,
@@ -102,6 +103,27 @@ describe('macdTrend', () => {
   it('is null while either line is warming up', () => {
     expect(macdTrend(null, 0.5)).toBeNull();
     expect(macdTrend(0.5, null)).toBeNull();
+  });
+});
+
+describe('isMacdFlip', () => {
+  it('detects a side change in either direction', () => {
+    expect(isMacdFlip('bullish', 'bearish')).toBe(true);
+    expect(isMacdFlip('bearish', 'bullish')).toBe(true);
+  });
+
+  it('ignores same-side and flat reads', () => {
+    expect(isMacdFlip('bullish', 'bullish')).toBe(false);
+    expect(isMacdFlip('bearish', 'bearish')).toBe(false);
+    expect(isMacdFlip('bullish', 'flat')).toBe(false);
+    expect(isMacdFlip('flat', 'bearish')).toBe(false);
+    expect(isMacdFlip('bearish', 'flat')).toBe(false);
+  });
+
+  it('ignores reads before the MACD baseline exists', () => {
+    expect(isMacdFlip(null, 'bullish')).toBe(false);
+    expect(isMacdFlip(null, 'bearish')).toBe(false);
+    expect(isMacdFlip('bullish', null)).toBe(false);
   });
 });
 

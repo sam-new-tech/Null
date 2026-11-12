@@ -32,10 +32,13 @@ import {
   BOT_LOT_SIZE,
   calculateIndicators,
   evaluateSignal,
+  isMacdFlip,
+  macdTrend,
   maxOpenPositions,
   STRATEGY_PARAMS,
   takeProfitFor,
   type Bar,
+  type MacdTrend,
   type StrategyIndicators,
   type StrategySignal,
 } from './engine';
@@ -170,6 +173,10 @@ export class BotRunner {
   private pendingEntryTime = 0;
   /** Last bar timestamp that produced an entry — one entry per closed bar. */
   private lastEntryBarTime = 0;
+  /** Last non-flat MACD side; null until the first completed read. */
+  private lastMacdSide: MacdTrend | null = null;
+  /** A MACD flip exit is in progress; block entries until managed trades are flat. */
+  private macdFlipExit = false;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -478,6 +485,10 @@ export class BotRunner {
     if (this.starting) throw new Error('Bot is currently starting');
     if (!liveEngine.connected) throw new Error('Connect cTrader account first');
 
+    // Fresh arming: the first MACD read establishes the side without closing.
+    this.lastMacdSide = null;
+    this.macdFlipExit = false;
+
     this.starting = true;
     try {
       const symId = this.symbolId(this.persisted.symbol);
@@ -599,6 +610,8 @@ export class BotRunner {
       this.persisted.positions = [];
       this.persisted.state = 'stopped';
       this.persisted.startedAt = null;
+      this.lastMacdSide = null;
+      this.macdFlipExit = false;
       this.pendingCloseAt.clear();
       for (const timer of this.tpTimers.values()) clearTimeout(timer);
       this.tpTimers.clear();
@@ -714,17 +727,21 @@ export class BotRunner {
   }
 
   /**
-   * Evaluate strategy signal and execute trade if criteria met.
+   * Evaluate the closed bar. A MACD side flip closes every managed trade
+   * before any new entry is considered.
    */
   private evaluateAndTrade(): void {
     if (this.persisted.state !== 'running') return;
+
+    const allInds = calculateIndicators(this.bars);
+    this.currentIndicators = allInds[allInds.length - 1] ?? this.currentIndicators;
+
+    if (this.handleMacdFlip()) return;
+
     const equity = liveEngine.accountState().equity;
     const maxPositions = maxOpenPositions(equity);
     if (this.persisted.positions.length >= maxPositions) return;
     if (Date.now() - this.pendingEntryTime < 10_000) return; // Order in flight
-
-    const allInds = calculateIndicators(this.bars);
-    this.currentIndicators = allInds[allInds.length - 1] ?? this.currentIndicators;
 
     const signal: StrategySignal = evaluateSignal(this.bars, allInds);
 
@@ -754,6 +771,55 @@ export class BotRunner {
       } catch (err) {
         this.pendingEntryTime = 0;
         this.log('error', `Order placement error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  /**
+   * MACD side-flip exit. Once the line crosses its signal, every managed trade
+   * is closed and entries pause until the book is flat. Returns true while the
+   * exit is active.
+   */
+  private handleMacdFlip(): boolean {
+    const side = macdTrend(this.currentIndicators.macdLine, this.currentIndicators.macdSignal);
+
+    if (isMacdFlip(this.lastMacdSide, side) && this.persisted.positions.length > 0) {
+      this.macdFlipExit = true;
+      this.log(
+        'signal',
+        `MACD flipped ${this.lastMacdSide?.toUpperCase()} -> ${side?.toUpperCase()} — closing ${this.persisted.positions.length} managed trade(s)`,
+      );
+    }
+    if (side === 'bullish' || side === 'bearish') this.lastMacdSide = side;
+
+    if (!this.macdFlipExit) return false;
+    if (this.persisted.positions.length === 0) {
+      this.macdFlipExit = false;
+      return false;
+    }
+
+    this.closeManagedPositions('MACD flip exit');
+    return true;
+  }
+
+  /** Send a market close for each managed position, retried at the TP cadence. */
+  private closeManagedPositions(reason: string): void {
+    const now = Date.now();
+    for (const pos of this.persisted.positions) {
+      const lastAttempt = this.pendingCloseAt.get(pos.id) ?? 0;
+      if (now - lastAttempt < CLOSE_RETRY_MS) continue;
+
+      this.pendingCloseAt.set(pos.id, now);
+      this.log('close', `${reason} — closing ${pos.side.toUpperCase()} position ${pos.id}`);
+      try {
+        const pair = closePosition(this.accountId(), pos.id, 0, 100, pos.volume);
+        liveEngine.execSend(pair.type, pair.payload);
+      } catch (err) {
+        this.pendingCloseAt.delete(pos.id);
+        this.log(
+          'error',
+          `Close failed for position ${pos.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }

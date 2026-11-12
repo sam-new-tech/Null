@@ -221,6 +221,13 @@ export function adxStrength(
   return value > threshold ? 'strong' : 'weak';
 }
 
+/** True when the MACD side changes between two directional reads. */
+export function isMacdFlip(previous: MacdTrend | null, next: MacdTrend | null): boolean {
+  if (previous !== 'bullish' && previous !== 'bearish') return false;
+  if (next !== 'bullish' && next !== 'bearish') return false;
+  return previous !== next;
+}
+
 /**
  * Calculate all indicators for the given 1m bars.
  * Returns an array of StrategyIndicators aligned with the input bars.
