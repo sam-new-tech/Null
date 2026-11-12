@@ -47,9 +47,10 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Arm gate | Start only with a ready live account | Verified | `bot.tsx` disables Start unless `live.status === 'ready'`; start re-checks engine connection |
 | Lot sizing | Fixed 0.01 lots per signal | Verified | `BOT_LOT_SIZE` + test; every order sends exactly 0.01 |
 | Position slots | `floor(equity / 20)` concurrent managed positions, integer | Verified | `maxOpenPositions()` + tests (753.14 → 37, 19.99 → 0); start dialog shows the cap |
+| MACD trend tile | Bot screen shows MACD(12, 26, 9) direction: BULLISH / BEARISH / FLAT | Verified (manual) | `macdTrend()` in `engine.ts` shared with the entry rule; tile maps it in `bot.tsx` |
 | Bot screen layout | Status tiles plus Stop; no Strategy Activity feed | Verified (manual) | Activity card removed from `bot.tsx` by request; the runner still records `status.logs` for diagnostics |
-| Indicators | 5m EMA(50) resampled, 1m ADX(14), 1m Volume Delta Control(14) | Verified | `engine.ts`; tests cover EMA alignment, the 14-bar VDC lookback, VDC candle/range math and ±20 bands, ADX 20 boundary, and signal gating |
-| Signal rules | Long/short require price vs EMA, ADX > 20 and VDC ≥ +20% / ≤ −20%; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (ADX 20 boundary, VDC ±20 boundaries, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
+| Indicators | 5m EMA(50) resampled, 1m MACD(12, 26, 9), 1m ADX(14), 1m Volume Delta Control(14) | Verified | `engine.ts`; tests cover EMA alignment, MACD line/signal warm-up, the 14-bar VDC lookback, VDC candle/range math and ±20 bands, ADX 20 boundary, and signal gating |
+| Signal rules | Long/short require price vs EMA, MACD line vs signal, ADX > 20 and VDC ≥ +20% / ≤ −20%; each qualifying bar may add one 0.01-lot position until the slot cap | Verified | `evaluateSignal` + tests (MACD direction gate, ADX 20 boundary, VDC ±20 boundaries, no entry); `evaluateAndTrade` enforces `maxOpenPositions` |
 | VDC tile | Bot screen shows the VDC(14) control percentage, coloured green (buyers), red (sellers) or neutral | Verified (manual) | `calculateVDC()` + `vdcControl()` in `engine.ts` shared with the entry rule; tile renders `formatVdc`/`vdcClass` in `bot.tsx` |
 | History warm-up | Fetch enough bars for EMA50 and warn when still warming | Verified | `BAR_COUNT = 600`, `MIN_BARS`, explicit error log |
 | Fill handling | Recognise both order status and execution-event names; size from broker volume | Fixed | `isFilledStatus` now accepts `ORDER_FILLED`; `ORDER_STATUS_FILLED`/numeric still work; test added |
@@ -79,7 +80,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 70 tests
+npm test -- --ci        # 8 suites, 74 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor

@@ -107,9 +107,9 @@ covered by a test. No strategy, pricing, order-routing, or navigation change.
 
 Unit (Jest):
 
-1. `engine.test.ts` — EMA resample alignment, the 14-bar VDC lookback,
-   VDC candle/range math and ±20 bands, ADX/VDC signal gating, position slots,
-   TP distance.
+1. `engine.test.ts` — EMA resample alignment, MACD line/signal warm-up,
+   the 14-bar VDC lookback, VDC candle/range math and ±20 bands, ADX/VDC signal
+   gating, position slots, TP distance.
 2. `orders.test.ts` — request payloads, volume conversion, side/status parsers,
    trendbar mapping incl. 1e5 scaling and delta fields.
 3. `scale.test.ts` — spot scaling (int vs double), staleness seconds.

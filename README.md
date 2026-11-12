@@ -13,10 +13,12 @@ usable.
 ## Strategy (what ships)
 
 - Instrument: XAU/USD, 1-minute bars.
-- Filters: 5-minute EMA(50) resampled from 1-minute closes, ADX(14) > 20, and
-  Volume Delta Control(14) with candle split (buyers ≥ +20%, sellers ≤ −20%).
-- Entries: long when price > EMA, ADX > 20 and VDC is in the buyers zone;
-  short on the mirror condition (price < EMA, VDC ≤ −20%).
+- Filters: 5-minute EMA(50) resampled from 1-minute closes, MACD(12, 26, 9),
+  ADX(14) > 20, and Volume Delta Control(14) with candle split (buyers ≥ +20%,
+  sellers ≤ −20%).
+- Entries: long when price > EMA, MACD line > signal, ADX > 20 and VDC is in
+  the buyers zone; short on the mirror condition (MACD line < signal,
+  VDC ≤ −20%).
 - Exit: every entry gets a fixed **$2.50** take profit measured from the live
   price at entry (buy = live + 2.50, sell = live − 2.50). The TP is pushed to
   the broker and retried until it is confirmed. There is **no stop loss**.
