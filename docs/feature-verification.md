@@ -58,6 +58,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 | Take profit size | Every entry gets TP = live price ± $2.50 | Verified | `takeProfitFor()` in `engine.ts` + tests; the runner anchors it to the live tick (fill price only as fallback) and rounds to symbol digits; no stop loss is ever sent |
 | Broker TP safety net | Amend position with TP after fill, retry until confirmed | Verified | `applyBrokerTakeProfit` sends `amendPositionSLTP` (no SL), re-checks the broker position every 3 s up to 4 attempts; a 60 s sync also re-applies TP to any managed position missing one |
 | Client TP exit | Close each position at TP, retry if no confirmation | Fixed | Per-position retry map (`CLOSE_RETRY_MS`, 15 s); closes every position whose TP is hit |
+| MACD flip exit | When MACD line crosses its signal line, close **every** managed position and pause new entries until flat | Verified | `isMacdFlip()` + tests (both directions, flat/null ignored); `handleMacdFlip()` runs before the slot cap and closes each managed position via the shared 15 s retry gate; baseline set on first read so restored trades are not closed on resume |
 | Close P/L log | Respect `moneyDigits` | Fixed | `runner.handleExecution` uses shared `money()` with `closePositionDetail.moneyDigits` |
 | Stop bot | Detach events, clear timer, close all managed positions, persist stopped | Verified | `stopAll()` loops every managed position; manual trades stay |
 | Restart resume | A persisted `running` bot reattaches after relaunch/reconnect | Fixed | `BotRunner.resume()/resumeIfRunning()` reattaches events, ensures spots, restarts the 60 s timer and resyncs; called from `auth` restore/adopt and `bot.tsx` when the account becomes ready |
@@ -81,7 +82,7 @@ Legend: **Verified** = behaves as intended · **Fixed** = mismatch found and cor
 ## 5. Verification commands
 
 ```bash
-npm test -- --ci        # 8 suites, 76 tests
+npm test -- --ci        # 8 suites, 79 tests
 npx tsc --noEmit
 npx expo lint
 npx expo-doctor

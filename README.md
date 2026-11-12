@@ -23,6 +23,9 @@ usable.
   price at entry (buy = live + 2.50, sell = live − 2.50). The TP is pushed to
   the broker and retried until it is confirmed. There is **no stop loss**.
   Multiple managed positions can run at once.
+- MACD flip exit: when the MACD line crosses its signal line to the other side,
+  the bot closes **every** managed position and pauses new entries until the
+  book is flat.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
   `floor(equity / $20)` (rounded down to a whole number).
 
