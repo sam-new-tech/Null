@@ -35,6 +35,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `75f6f18` | `feat(bot)`: MACD side flip closes every managed trade and pauses entries until flat; flip tests added. |
 | `7ea5345` | `feat(notify)`: bundled custom sounds — entry fills play `entry.wav`, closes play `exit.wav`, with per-sound Android channels. |
 | `1534776` | `feat(bot)`: burst entries — a qualifying bar fills every free equity slot at once, counting in-flight orders against the cap. |
+| `6139ac9` | `feat(bot)`: Stochastic divergence exit — bullish divergence closes shorts, bearish closes longs, ported from the Pine script. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -46,7 +47,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 80 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 86 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |

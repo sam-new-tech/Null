@@ -26,6 +26,10 @@ usable.
 - MACD flip exit: when the MACD line crosses its signal line to the other side,
   the bot closes **every** managed position and pauses new entries until the
   book is flat.
+- Stochastic divergence exit: the bot watches a Stochastic(14) divergence
+  (pivot left/right 1, previous pivot 5–60 bars back, normal and hidden). A
+  **bullish** divergence closes managed **shorts**; a **bearish** divergence
+  closes managed **longs**. Entries wait for the next bar.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
   `floor(equity / $20)` (rounded down to a whole number).
 - Entries: when a bar qualifies, the bot fills **all free slots at once**, one
