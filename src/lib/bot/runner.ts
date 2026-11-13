@@ -22,6 +22,7 @@ import {
   asSide,
   closePosition,
   isFilledStatus,
+  isRejectedStatus,
   mapTrendbars,
   placeMarketOrder,
   TrendbarPeriod,
@@ -29,6 +30,7 @@ import {
 import { storeGet, storeSet } from '../storage';
 import { ensureNotifyPermissions, notify } from '../notify';
 import {
+  availableSlots,
   BOT_LOT_SIZE,
   calculateIndicators,
   evaluateSignal,
@@ -170,8 +172,11 @@ export class BotRunner {
   private pendingCloseAt = new Map<number, number>();
   /** Pending broker-TP verification timers per position id. */
   private tpTimers = new Map<number, ReturnType<typeof setTimeout>>();
-  private pendingEntryTime = 0;
-  /** Last bar timestamp that produced an entry — one entry per closed bar. */
+  /** Entry orders sent but not yet filled/rejected in the current burst. */
+  private pendingEntries = 0;
+  /** When the current burst started, so lost execution events expire. */
+  private pendingEntriesAt = 0;
+  /** Last bar timestamp that produced a burst — one burst per closed bar. */
   private lastEntryBarTime = 0;
   /** Last non-flat MACD side; null until the first completed read. */
   private lastMacdSide: MacdTrend | null = null;
@@ -488,6 +493,8 @@ export class BotRunner {
     // Fresh arming: the first MACD read establishes the side without closing.
     this.lastMacdSide = null;
     this.macdFlipExit = false;
+    this.pendingEntries = 0;
+    this.pendingEntriesAt = 0;
 
     this.starting = true;
     try {
@@ -612,6 +619,8 @@ export class BotRunner {
       this.persisted.startedAt = null;
       this.lastMacdSide = null;
       this.macdFlipExit = false;
+      this.pendingEntries = 0;
+      this.pendingEntriesAt = 0;
       this.pendingCloseAt.clear();
       for (const timer of this.tpTimers.values()) clearTimeout(timer);
       this.tpTimers.clear();
@@ -738,40 +747,56 @@ export class BotRunner {
 
     if (this.handleMacdFlip()) return;
 
+    // Safety valve: if the broker never confirms an order (lost execution
+    // event), release the reserved slots after a minute instead of blocking
+    // entries forever.
+    if (this.pendingEntries > 0 && Date.now() - this.pendingEntriesAt > 60_000) {
+      this.pendingEntries = 0;
+      this.pendingEntriesAt = 0;
+    }
+
     const equity = liveEngine.accountState().equity;
     const maxPositions = maxOpenPositions(equity);
-    if (this.persisted.positions.length >= maxPositions) return;
-    if (Date.now() - this.pendingEntryTime < 10_000) return; // Order in flight
+    const free = availableSlots(maxPositions, this.persisted.positions.length, this.pendingEntries);
+    if (free <= 0) return;
 
     const signal: StrategySignal = evaluateSignal(this.bars, allInds);
 
     if (signal.action === 'buy' || signal.action === 'sell') {
-      // One entry per closed bar: the timer sync and the tick loop can both
+      // One burst per closed bar: the timer sync and the tick loop can both
       // observe the same latest bar.
       const barTime = this.bars[this.bars.length - 1]?.time ?? 0;
       if (barTime === this.lastEntryBarTime) return;
 
       this.lastEntryBarTime = barTime;
-      this.pendingEntryTime = Date.now();
+      this.pendingEntries += free;
+      this.pendingEntriesAt = Date.now();
       const previewTp = this.entryTakeProfit(signal.action, signal.price);
       this.log(
         'signal',
-        `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${BOT_LOT_SIZE} lots (${this.persisted.positions.length + 1}/${maxPositions}, TP: ${previewTp.toFixed(2)})`,
+        `${signal.reason} -> Placing ${signal.action.toUpperCase()} ${BOT_LOT_SIZE} x${free} (${this.persisted.positions.length} open, TP: ${previewTp.toFixed(2)})`,
       );
 
-      try {
-        const pair = placeMarketOrder(this.accountId(), {
-          symbolId: this.persisted.symbolId,
-          side: signal.action,
-          volumeLots: BOT_LOT_SIZE,
-          label: `${BOT_LABEL_PREFIX}_${signal.action}`,
-          unitsPerLot: XAUUSD_UNITS_PER_LOT,
-        });
-        liveEngine.execSend(pair.type, pair.payload);
-      } catch (err) {
-        this.pendingEntryTime = 0;
-        this.log('error', `Order placement error: ${err instanceof Error ? err.message : String(err)}`);
+      let sent = 0;
+      for (let i = 0; i < free; i++) {
+        try {
+          const pair = placeMarketOrder(this.accountId(), {
+            symbolId: this.persisted.symbolId,
+            side: signal.action,
+            volumeLots: BOT_LOT_SIZE,
+            label: `${BOT_LABEL_PREFIX}_${signal.action}`,
+            unitsPerLot: XAUUSD_UNITS_PER_LOT,
+          });
+          liveEngine.execSend(pair.type, pair.payload);
+          sent++;
+        } catch (err) {
+          this.pendingEntries = Math.max(0, this.pendingEntries - 1);
+          this.log('error', `Order placement error: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
+
+      if (this.pendingEntries === 0) this.pendingEntriesAt = 0;
+      if (sent < free) this.emit();
     }
   }
 
@@ -832,6 +857,26 @@ export class BotRunner {
     const deal = payload.deal as Record<string, unknown> | undefined;
     const position = payload.position as Record<string, unknown> | undefined;
 
+    // 0. Order Rejected -> release the slot reserved by the burst entry.
+    if (isRejectedStatus(payload.executionType) || isRejectedStatus(order?.orderStatus)) {
+      const tradeData = order?.tradeData as Record<string, unknown> | undefined;
+      const rawLabel = tradeData?.label ?? order?.label;
+      const label = typeof rawLabel === 'string' ? rawLabel : undefined;
+      if (label === undefined || label.startsWith(BOT_LABEL_PREFIX)) {
+        this.pendingEntries = Math.max(0, this.pendingEntries - 1);
+        if (this.pendingEntries === 0) this.pendingEntriesAt = 0;
+      }
+      const reason =
+        typeof payload.errorCode === 'string'
+          ? payload.errorCode
+          : typeof payload.description === 'string'
+            ? payload.description
+            : 'no reason';
+      this.log('error', `Order rejected (${reason})`);
+      this.emit();
+      return;
+    }
+
     // 1. Order Fill -> Position Opened
     if (isFilledStatus(order?.orderStatus) || isFillExecution(payload.executionType)) {
       const posId = Number(position?.positionId ?? deal?.positionId ?? order?.positionId);
@@ -854,7 +899,8 @@ export class BotRunner {
           openedAt: Date.now(),
         };
         this.persisted.positions = [...this.persisted.positions, opened];
-        this.pendingEntryTime = 0;
+        this.pendingEntries = Math.max(0, this.pendingEntries - 1);
+        if (this.pendingEntries === 0) this.pendingEntriesAt = 0;
         this.pendingCloseAt.delete(posId);
 
         this.log(

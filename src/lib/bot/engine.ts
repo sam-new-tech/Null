@@ -424,6 +424,21 @@ export function maxOpenPositions(equity: number): number {
   return Math.floor(equity / 20);
 }
 
+/**
+ * Free managed-position slots, counting orders that are already in flight.
+ * Burst entries use this so one qualifying bar can fill every remaining slot
+ * without overshooting the equity cap while fills are still arriving.
+ */
+export function availableSlots(
+  maxPositions: number,
+  openPositions: number,
+  pendingEntries = 0,
+): number {
+  if (!Number.isFinite(maxPositions) || maxPositions <= 0) return 0;
+  const used = Math.max(0, openPositions) + Math.max(0, pendingEntries);
+  return Math.max(0, Math.floor(maxPositions) - used);
+}
+
 /** @deprecated Kept only for the legacy research sandbox; the live bot uses {@link BOT_LOT_SIZE}. */
 export function calculateLots(equity: number, cap = 0.05): number {
   if (!Number.isFinite(equity) || equity <= 0) return 0.01;

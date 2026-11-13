@@ -1,5 +1,6 @@
 import {
   adxStrength,
+  availableSlots,
   BOT_LOT_SIZE,
   calculateIndicators,
   calculateVDC,
@@ -78,6 +79,16 @@ describe('position sizing', () => {
     expect(maxOpenPositions(-100)).toBe(0);
     expect(maxOpenPositions(Number.NaN)).toBe(0);
     expect(maxOpenPositions(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
+  it('reserves slots for orders still in flight', () => {
+    expect(availableSlots(15, 0)).toBe(15);
+    expect(availableSlots(15, 4)).toBe(11);
+    expect(availableSlots(15, 4, 6)).toBe(5);
+    expect(availableSlots(15, 10, 5)).toBe(0);
+    expect(availableSlots(15, 10, 99)).toBe(0);
+    expect(availableSlots(0, 0)).toBe(0);
+    expect(availableSlots(Number.NaN, 0)).toBe(0);
   });
 });
 
