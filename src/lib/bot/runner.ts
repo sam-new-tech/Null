@@ -33,6 +33,7 @@ import {
   availableSlots,
   BOT_LOT_SIZE,
   calculateIndicators,
+  detectStochDivergence,
   evaluateSignal,
   isMacdFlip,
   macdTrend,
@@ -41,6 +42,7 @@ import {
   takeProfitFor,
   type Bar,
   type MacdTrend,
+  type StochDivergence,
   type StrategyIndicators,
   type StrategySignal,
 } from './engine';
@@ -747,6 +749,8 @@ export class BotRunner {
 
     if (this.handleMacdFlip()) return;
 
+    if (this.handleStochDivergence(detectStochDivergence(this.bars))) return;
+
     // Safety valve: if the broker never confirms an order (lost execution
     // event), release the reserved slots after a minute instead of blocking
     // entries forever.
@@ -827,10 +831,38 @@ export class BotRunner {
     return true;
   }
 
-  /** Send a market close for each managed position, retried at the TP cadence. */
-  private closeManagedPositions(reason: string): void {
+  /**
+   * Stochastic divergence exit: bullish divergence closes managed shorts,
+   * bearish divergence closes managed longs (the Pine "opposite exit").
+   * Returns true on the confirming bar so entries wait for the next bar.
+   */
+  private handleStochDivergence(div: StochDivergence): boolean {
+    if (!div.bullish && !div.bearish) return false;
+
+    if (div.bullish) {
+      const shorts = this.persisted.positions.filter((p) => p.side === 'sell');
+      if (shorts.length > 0) {
+        this.log('signal', `Bullish Stoch divergence — closing ${shorts.length} managed short(s)`);
+        this.closeManagedPositions('Bullish Stoch divergence exit', 'sell');
+      }
+    }
+
+    if (div.bearish) {
+      const longs = this.persisted.positions.filter((p) => p.side === 'buy');
+      if (longs.length > 0) {
+        this.log('signal', `Bearish Stoch divergence — closing ${longs.length} managed long(s)`);
+        this.closeManagedPositions('Bearish Stoch divergence exit', 'buy');
+      }
+    }
+
+    return true;
+  }
+
+  /** Send a market close for managed positions, retried at the TP cadence. */
+  private closeManagedPositions(reason: string, side?: 'buy' | 'sell'): void {
     const now = Date.now();
     for (const pos of this.persisted.positions) {
+      if (side !== undefined && pos.side !== side) continue;
       const lastAttempt = this.pendingCloseAt.get(pos.id) ?? 0;
       if (now - lastAttempt < CLOSE_RETRY_MS) continue;
 

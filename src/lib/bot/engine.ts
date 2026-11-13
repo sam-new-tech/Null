@@ -12,6 +12,11 @@
  * - Long:  price > ema50_5m AND macd_line > macd_signal AND adx > 20.0 AND VDC >= +20 -> TP = live price + 2.5
  * - Short: price < ema50_5m AND macd_line < macd_signal AND adx > 20.0 AND VDC <= -20 -> TP = live price - 2.5
  *
+ * Exits:
+ * - MACD line/signal side flip closes every managed trade.
+ * - Stochastic divergence (14, pivot 1/1, gap 5..60): bullish closes shorts,
+ *   bearish closes longs (normal and hidden variants both count).
+ *
  * Position Rules:
  * - Fixed 0.01 lots per signal, up to floor(equity / 20) concurrent positions.
  * - Every entry gets a fixed $2.50 take profit from the live price at entry.
@@ -61,6 +66,10 @@ export const STRATEGY_PARAMS = {
   macdSignal: 9,
   adxPeriod: 14,
   vdcPeriod: 14,
+  stochKLen: 14,
+  stochKSmooth: 1,
+  stochGapMin: 5,
+  stochGapMax: 60,
 } as const;
 
 /**
@@ -226,6 +235,136 @@ export function isMacdFlip(previous: MacdTrend | null, next: MacdTrend | null): 
   if (previous !== 'bullish' && previous !== 'bearish') return false;
   if (next !== 'bullish' && next !== 'bearish') return false;
   return previous !== next;
+}
+
+/**
+ * Pine-equivalent `ta.stoch(close, high, low, kLen)` with `SMA(kSmooth)`.
+ * Null while warming up (or when the range is zero), matching Pine's `na`.
+ */
+export function calculateStochasticK(
+  bars: Bar[],
+  kLen: number = STRATEGY_PARAMS.stochKLen,
+  kSmooth: number = STRATEGY_PARAMS.stochKSmooth,
+): (number | null)[] {
+  const n = bars.length;
+  const raw: (number | null)[] = new Array(n).fill(null);
+  if (kLen <= 0) return raw;
+
+  for (let i = kLen - 1; i < n; i++) {
+    let highest = -Infinity;
+    let lowest = Infinity;
+    for (let j = i - kLen + 1; j <= i; j++) {
+      if (bars[j].high > highest) highest = bars[j].high;
+      if (bars[j].low < lowest) lowest = bars[j].low;
+    }
+    const range = highest - lowest;
+    raw[i] = range > 0 ? (100 * (bars[i].close - lowest)) / range : null;
+  }
+
+  if (kSmooth <= 1) return raw;
+
+  const out: (number | null)[] = new Array(n).fill(null);
+  for (let i = kSmooth - 1; i < n; i++) {
+    let sum = 0;
+    let complete = true;
+    for (let j = i - kSmooth + 1; j <= i; j++) {
+      const value = raw[j];
+      if (value === null) {
+        complete = false;
+        break;
+      }
+      sum += value;
+    }
+    out[i] = complete ? sum / kSmooth : null;
+  }
+  return out;
+}
+
+/** Divergence flags confirmed on the latest closed bar. */
+export interface StochDivergence {
+  /** Bullish divergence (normal or hidden) — exit managed shorts. */
+  bullish: boolean;
+  /** Bearish divergence (normal or hidden) — exit managed longs. */
+  bearish: boolean;
+}
+
+/**
+ * Pine-equivalent "Stochastic Divergence": pivot left/right = 1, the previous
+ * pivot must be 5..60 bars back, and both normal and hidden variants count.
+ * Only the latest closed bar can report a divergence.
+ */
+export function findStochDivergence(
+  k: (number | null)[],
+  bars: Bar[],
+  gapMin: number = STRATEGY_PARAMS.stochGapMin,
+  gapMax: number = STRATEGY_PARAMS.stochGapMax,
+): StochDivergence {
+  const result: StochDivergence = { bullish: false, bearish: false };
+  const n = Math.min(k.length, bars.length);
+  if (n < 3) return result;
+
+  let lowOsc: number | null = null;
+  let lowPrice = 0;
+  let lowBar = -1;
+  let highOsc: number | null = null;
+  let highPrice = 0;
+  let highBar = -1;
+
+  for (let i = 1; i < n; i++) {
+    // right = 1: the pivot bar is confirmed by the following bar.
+    const pivot = i - 1;
+    const osc = k[pivot];
+    const left = k[pivot - 1];
+    const right = k[i];
+    if (
+      osc === null ||
+      !Number.isFinite(osc) ||
+      left === null ||
+      !Number.isFinite(left) ||
+      right === null ||
+      !Number.isFinite(right)
+    ) {
+      continue;
+    }
+
+    const isLow = osc < left && osc < right;
+    const isHigh = osc > left && osc > right;
+
+    if (isLow) {
+      const price = bars[pivot].low;
+      if (lowBar >= 0 && lowOsc !== null) {
+        const gap = pivot - lowBar;
+        if (gap >= gapMin && gap <= gapMax) {
+          const normal = price < lowPrice && osc > lowOsc;
+          const hidden = price > lowPrice && osc < lowOsc;
+          if ((normal || hidden) && i === n - 1) result.bullish = true;
+        }
+      }
+      lowOsc = osc;
+      lowPrice = price;
+      lowBar = pivot;
+    } else if (isHigh) {
+      const price = bars[pivot].high;
+      if (highBar >= 0 && highOsc !== null) {
+        const gap = pivot - highBar;
+        if (gap >= gapMin && gap <= gapMax) {
+          const normal = price > highPrice && osc < highOsc;
+          const hidden = price < highPrice && osc > highOsc;
+          if ((normal || hidden) && i === n - 1) result.bearish = true;
+        }
+      }
+      highOsc = osc;
+      highPrice = price;
+      highBar = pivot;
+    }
+  }
+
+  return result;
+}
+
+/** Stochastic divergence on the latest closed bar, computed from 1m bars. */
+export function detectStochDivergence(bars: Bar[]): StochDivergence {
+  return findStochDivergence(calculateStochasticK(bars), bars);
 }
 
 /**

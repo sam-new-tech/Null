@@ -3,8 +3,10 @@ import {
   availableSlots,
   BOT_LOT_SIZE,
   calculateIndicators,
+  calculateStochasticK,
   calculateVDC,
   evaluateSignal,
+  findStochDivergence,
   isMacdFlip,
   macdTrend,
   maxOpenPositions,
@@ -135,6 +137,88 @@ describe('isMacdFlip', () => {
     expect(isMacdFlip(null, 'bullish')).toBe(false);
     expect(isMacdFlip(null, 'bearish')).toBe(false);
     expect(isMacdFlip('bullish', null)).toBe(false);
+  });
+});
+
+/** Synthetic divergence fixture: %K pivots at the given indexes. */
+function divergenceFixture(
+  kOverrides: Record<number, number>,
+  lows: Record<number, number> = {},
+  highs: Record<number, number> = {},
+  length = 17,
+): { k: (number | null)[]; bars: Bar[] } {
+  const k: (number | null)[] = new Array(length).fill(30);
+  for (const [index, value] of Object.entries(kOverrides)) k[Number(index)] = value;
+  const bars = Array.from({ length }, (_, index) => {
+    const bar = makeBar(index, 100);
+    if (lows[index] !== undefined) bar.low = lows[index];
+    if (highs[index] !== undefined) bar.high = highs[index];
+    return bar;
+  });
+  return { k, bars };
+}
+
+describe('stochastic divergence', () => {
+  it('warms %K up after kLen bars and keeps it within 0..100', () => {
+    const bars = Array.from({ length: 20 }, (_, index) => ({
+      ...makeBar(index, 100),
+      high: 110,
+      low: 90,
+    }));
+    const k = calculateStochasticK(bars);
+    expect(k[12]).toBeNull();
+    expect(k[13]).toBeCloseTo(50);
+    expect(k[19]).toBeCloseTo(50);
+  });
+
+  it('reports 0 at the window low and 100 at the window high', () => {
+    const lowBars = Array.from({ length: 14 }, (_, index) => ({
+      ...makeBar(index, index === 13 ? 90 : 100),
+      high: 110,
+      low: 90,
+    }));
+    const highBars = Array.from({ length: 14 }, (_, index) => ({
+      ...makeBar(index, index === 13 ? 110 : 100),
+      high: 110,
+      low: 90,
+    }));
+    expect(calculateStochasticK(lowBars)[13]).toBeCloseTo(0);
+    expect(calculateStochasticK(highBars)[13]).toBeCloseTo(100);
+  });
+
+  it('detects normal and hidden bullish divergence', () => {
+    const normal = divergenceFixture({ 5: 20, 15: 25 }, { 5: 100, 15: 95 });
+    expect(findStochDivergence(normal.k, normal.bars)).toEqual({ bullish: true, bearish: false });
+
+    const hidden = divergenceFixture({ 5: 20, 15: 15 }, { 5: 100, 15: 105 });
+    expect(findStochDivergence(hidden.k, hidden.bars)).toEqual({ bullish: true, bearish: false });
+  });
+
+  it('detects normal and hidden bearish divergence', () => {
+    const normal = divergenceFixture({ 5: 80, 15: 75 }, {}, { 5: 100, 15: 105 });
+    expect(findStochDivergence(normal.k, normal.bars)).toEqual({ bullish: false, bearish: true });
+
+    const hidden = divergenceFixture({ 5: 80, 15: 85 }, {}, { 5: 100, 15: 95 });
+    expect(findStochDivergence(hidden.k, hidden.bars)).toEqual({ bullish: false, bearish: true });
+  });
+
+  it('requires the previous pivot to be 5..60 bars back', () => {
+    const tooClose = divergenceFixture({ 3: 20, 7: 25 }, { 3: 100, 7: 95 }, {}, 9);
+    expect(findStochDivergence(tooClose.k, tooClose.bars)).toEqual({
+      bullish: false,
+      bearish: false,
+    });
+
+    const tooFar = divergenceFixture({ 1: 20, 62: 25 }, { 1: 100, 63: 95 }, {}, 64);
+    expect(findStochDivergence(tooFar.k, tooFar.bars)).toEqual({
+      bullish: false,
+      bearish: false,
+    });
+  });
+
+  it('only reports a divergence on the bar that confirms it', () => {
+    const stale = divergenceFixture({ 5: 20, 15: 25 }, { 5: 100, 15: 95 }, {}, 18);
+    expect(findStochDivergence(stale.k, stale.bars)).toEqual({ bullish: false, bearish: false });
   });
 });
 
