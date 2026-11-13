@@ -3,6 +3,7 @@ import {
   availableSlots,
   BOT_LOT_SIZE,
   calculateIndicators,
+  calculateStochasticD,
   calculateStochasticK,
   calculateVDC,
   evaluateSignal,
@@ -184,6 +185,11 @@ describe('stochastic divergence', () => {
     }));
     expect(calculateStochasticK(lowBars)[13]).toBeCloseTo(0);
     expect(calculateStochasticK(highBars)[13]).toBeCloseTo(100);
+  });
+
+  it('smooths %D with the default 3-period SMA', () => {
+    expect(calculateStochasticD([10, 20, 30, 40])).toEqual([null, null, 20, 30]);
+    expect(calculateStochasticD([10, null, 30])).toEqual([null, null, null]);
   });
 
   it('detects normal and hidden bullish divergence', () => {

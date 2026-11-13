@@ -68,6 +68,7 @@ export const STRATEGY_PARAMS = {
   vdcPeriod: 14,
   stochKLen: 14,
   stochKSmooth: 1,
+  stochDSmooth: 3,
   stochGapMin: 5,
   stochGapMax: 60,
 } as const;
@@ -237,6 +238,28 @@ export function isMacdFlip(previous: MacdTrend | null, next: MacdTrend | null): 
   return previous !== next;
 }
 
+/** Rolling SMA that mirrors Pine's `ta.sma` (null until the window is full). */
+function smoothSeries(values: (number | null)[], period: number): (number | null)[] {
+  const n = values.length;
+  const out: (number | null)[] = new Array(n).fill(null);
+  if (period <= 0) return out;
+
+  for (let i = period - 1; i < n; i++) {
+    let sum = 0;
+    let complete = true;
+    for (let j = i - period + 1; j <= i; j++) {
+      const value = values[j];
+      if (value === null) {
+        complete = false;
+        break;
+      }
+      sum += value;
+    }
+    out[i] = complete ? sum / period : null;
+  }
+  return out;
+}
+
 /**
  * Pine-equivalent `ta.stoch(close, high, low, kLen)` with `SMA(kSmooth)`.
  * Null while warming up (or when the range is zero), matching Pine's `na`.
@@ -261,23 +284,18 @@ export function calculateStochasticK(
     raw[i] = range > 0 ? (100 * (bars[i].close - lowest)) / range : null;
   }
 
-  if (kSmooth <= 1) return raw;
+  return kSmooth <= 1 ? raw : smoothSeries(raw, kSmooth);
+}
 
-  const out: (number | null)[] = new Array(n).fill(null);
-  for (let i = kSmooth - 1; i < n; i++) {
-    let sum = 0;
-    let complete = true;
-    for (let j = i - kSmooth + 1; j <= i; j++) {
-      const value = raw[j];
-      if (value === null) {
-        complete = false;
-        break;
-      }
-      sum += value;
-    }
-    out[i] = complete ? sum / kSmooth : null;
-  }
-  return out;
+/**
+ * Pine-equivalent `%D = ta.sma(%K, dSmooth)`. Default matches the script's
+ * `dSmooth = 3`. %D is plotted only; the divergence alerts pivot on %K.
+ */
+export function calculateStochasticD(
+  k: (number | null)[],
+  dSmooth: number = STRATEGY_PARAMS.stochDSmooth,
+): (number | null)[] {
+  return smoothSeries(k, dSmooth);
 }
 
 /** Divergence flags confirmed on the latest closed bar. */
