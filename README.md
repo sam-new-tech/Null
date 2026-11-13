@@ -28,6 +28,9 @@ usable.
   book is flat.
 - Sizing: fixed 0.01 lots per signal. Concurrent position slots =
   `floor(equity / $20)` (rounded down to a whole number).
+- Entries: when a bar qualifies, the bot fills **all free slots at once**, one
+  0.01-lot order per slot, up to the equity cap. In-flight orders count toward
+  the cap, and a burst runs at most once per closed bar.
 - Notifications: entry fills play `assets/sounds/entry.wav` and closes play
   `assets/sounds/exit.wav` (bundled through the `expo-notifications` plugin).
 

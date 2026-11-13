@@ -34,6 +34,7 @@ Spec: `docs/qa-refactor-spec.md`
 | `36f86a4` | `feat(ui)`: bot tiles renamed to Trend, EMA, Strength and Volume; ADX now reads WEAK/STRONG with a strict 20 threshold. |
 | `75f6f18` | `feat(bot)`: MACD side flip closes every managed trade and pauses entries until flat; flip tests added. |
 | `7ea5345` | `feat(notify)`: bundled custom sounds — entry fills play `entry.wav`, closes play `exit.wav`, with per-sound Android channels. |
+| `1534776` | `feat(bot)`: burst entries — a qualifying bar fills every free equity slot at once, counting in-flight orders against the cap. |
 
 Documentation: replaced the stock Expo README, added
 `docs/best-practices.md`, and labelled the grid sandbox + filter-sweep
@@ -45,7 +46,7 @@ results as legacy.
 |---|---|---|
 | App typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npx expo lint` | pass |
-| Unit tests | `npm test -- --ci` | 8 suites, 79 tests pass |
+| Unit tests | `npm test -- --ci` | 8 suites, 80 tests pass |
 | Dependency/config health | `npx expo-doctor` | 21/21 checks pass |
 | Research typecheck | `cd Context/gridbot && npx tsc --noEmit` | pass |
 | Research sanity | `cd Context/gridbot && npm test` | 6/6 checks pass |
