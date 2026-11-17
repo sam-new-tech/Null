@@ -23,9 +23,10 @@ usable.
   price at entry (buy = live + 2.50, sell = live − 2.50). The TP is pushed to
   the broker and retried until it is confirmed. There is **no stop loss**.
   Multiple managed positions can run at once.
-- MACD flip exit: when the MACD line crosses its signal line to the other side,
-  the bot closes **every** managed position and pauses new entries until the
-  book is flat.
+- MACD exit: while the MACD line is above its signal line, the bot closes
+  managed **short** positions; while it is below, it closes managed **long**
+  positions. This is a state rule, so a restored position on the wrong side is
+  closed on the next evaluation. Entries wait for the next bar after a close.
 - Stochastic divergence exit: the bot watches a Stochastic(14) divergence
   (pivot left/right 1, previous pivot 5–60 bars back, normal and hidden). A
   **bullish** divergence closes managed **shorts**; a **bearish** divergence
@@ -37,6 +38,7 @@ usable.
   the cap, and a burst runs at most once per closed bar.
 - Notifications: entry fills play `assets/sounds/entry.wav` and closes play
   `assets/sounds/exit.wav` (bundled through the `expo-notifications` plugin).
+  A foreground handler is registered so alerts also show while the app is open.
 
 The grid/DCA experiments under `Context/gridbot` are a separate, legacy
 research sandbox and do **not** describe the shipped strategy.

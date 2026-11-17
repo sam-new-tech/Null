@@ -8,7 +8,6 @@ import {
   calculateVDC,
   evaluateSignal,
   findStochDivergence,
-  isMacdFlip,
   macdTrend,
   maxOpenPositions,
   resample5mEMA,
@@ -120,27 +119,6 @@ describe('macdTrend', () => {
   });
 });
 
-describe('isMacdFlip', () => {
-  it('detects a side change in either direction', () => {
-    expect(isMacdFlip('bullish', 'bearish')).toBe(true);
-    expect(isMacdFlip('bearish', 'bullish')).toBe(true);
-  });
-
-  it('ignores same-side and flat reads', () => {
-    expect(isMacdFlip('bullish', 'bullish')).toBe(false);
-    expect(isMacdFlip('bearish', 'bearish')).toBe(false);
-    expect(isMacdFlip('bullish', 'flat')).toBe(false);
-    expect(isMacdFlip('flat', 'bearish')).toBe(false);
-    expect(isMacdFlip('bearish', 'flat')).toBe(false);
-  });
-
-  it('ignores reads before the MACD baseline exists', () => {
-    expect(isMacdFlip(null, 'bullish')).toBe(false);
-    expect(isMacdFlip(null, 'bearish')).toBe(false);
-    expect(isMacdFlip('bullish', null)).toBe(false);
-  });
-});
-
 /** Synthetic divergence fixture: %K pivots at the given indexes. */
 function divergenceFixture(
   kOverrides: Record<number, number>,
@@ -220,6 +198,14 @@ describe('stochastic divergence', () => {
       bullish: false,
       bearish: false,
     });
+  });
+
+  it('accepts pivots exactly at the 5-bar and 60-bar gap boundaries', () => {
+    const minGap = divergenceFixture({ 5: 20, 10: 25 }, { 5: 100, 10: 95 }, {}, 12);
+    expect(findStochDivergence(minGap.k, minGap.bars)).toEqual({ bullish: true, bearish: false });
+
+    const maxGap = divergenceFixture({ 5: 20, 65: 25 }, { 5: 100, 65: 95 }, {}, 67);
+    expect(findStochDivergence(maxGap.k, maxGap.bars)).toEqual({ bullish: true, bearish: false });
   });
 
   it('only reports a divergence on the bar that confirms it', () => {

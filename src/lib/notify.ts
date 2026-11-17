@@ -22,6 +22,30 @@ const CHANNEL: Record<NotifySound, { id: string; name: string }> = {
 
 let cached: NotificationsModule | null | undefined;
 let channelsReady: Promise<void> | null = null;
+let handlerReady = false;
+
+/**
+ * Without a foreground handler expo-notifications discards notifications that
+ * arrive while the app is open (SDK 57 handler contract: "The default behavior
+ * when the handler is not set ... is not to show the notification"). Registering
+ * it once makes fills/closes visible even on the bot screen.
+ */
+function registerHandler(mod: NotificationsModule): void {
+  if (handlerReady) return;
+  try {
+    mod.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+    handlerReady = true;
+  } catch {
+    // Older/custom builds without the handler API still deliver in background.
+  }
+}
 
 /**
  * Expo Go (SDK 53+) throws at import time for expo-notifications — the native
@@ -41,6 +65,7 @@ function load(): NotificationsModule | null {
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     cached = require('expo-notifications') as NotificationsModule;
+    registerHandler(cached);
   } catch {
     cached = null;
   }

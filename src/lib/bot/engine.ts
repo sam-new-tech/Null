@@ -13,7 +13,8 @@
  * - Short: price < ema50_5m AND macd_line < macd_signal AND adx > 20.0 AND VDC <= -20 -> TP = live price - 2.5
  *
  * Exits:
- * - MACD line/signal side flip closes every managed trade.
+ * - MACD line above its signal closes managed shorts; below it closes managed
+ *   longs (a state rule, not only a fresh cross).
  * - Stochastic divergence (14, pivot 1/1, gap 5..60): bullish closes shorts,
  *   bearish closes longs (normal and hidden variants both count).
  *
@@ -229,13 +230,6 @@ export function adxStrength(
 ): AdxStrength | null {
   if (value === null || !Number.isFinite(value)) return null;
   return value > threshold ? 'strong' : 'weak';
-}
-
-/** True when the MACD side changes between two directional reads. */
-export function isMacdFlip(previous: MacdTrend | null, next: MacdTrend | null): boolean {
-  if (previous !== 'bullish' && previous !== 'bearish') return false;
-  if (next !== 'bullish' && next !== 'bearish') return false;
-  return previous !== next;
 }
 
 /** Rolling SMA that mirrors Pine's `ta.sma` (null until the window is full). */

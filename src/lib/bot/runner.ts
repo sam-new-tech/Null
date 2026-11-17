@@ -35,13 +35,11 @@ import {
   calculateIndicators,
   detectStochDivergence,
   evaluateSignal,
-  isMacdFlip,
   macdTrend,
   maxOpenPositions,
   STRATEGY_PARAMS,
   takeProfitFor,
   type Bar,
-  type MacdTrend,
   type StochDivergence,
   type StrategyIndicators,
   type StrategySignal,
@@ -180,10 +178,6 @@ export class BotRunner {
   private pendingEntriesAt = 0;
   /** Last bar timestamp that produced a burst — one burst per closed bar. */
   private lastEntryBarTime = 0;
-  /** Last non-flat MACD side; null until the first completed read. */
-  private lastMacdSide: MacdTrend | null = null;
-  /** A MACD flip exit is in progress; block entries until managed trades are flat. */
-  private macdFlipExit = false;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -492,9 +486,6 @@ export class BotRunner {
     if (this.starting) throw new Error('Bot is currently starting');
     if (!liveEngine.connected) throw new Error('Connect cTrader account first');
 
-    // Fresh arming: the first MACD read establishes the side without closing.
-    this.lastMacdSide = null;
-    this.macdFlipExit = false;
     this.pendingEntries = 0;
     this.pendingEntriesAt = 0;
 
@@ -619,8 +610,6 @@ export class BotRunner {
       this.persisted.positions = [];
       this.persisted.state = 'stopped';
       this.persisted.startedAt = null;
-      this.lastMacdSide = null;
-      this.macdFlipExit = false;
       this.pendingEntries = 0;
       this.pendingEntriesAt = 0;
       this.pendingCloseAt.clear();
@@ -738,8 +727,7 @@ export class BotRunner {
   }
 
   /**
-   * Evaluate the closed bar. A MACD side flip closes every managed trade
-   * before any new entry is considered.
+   * Evaluate the closed bar. A MACD/exits pass runs before any new entry.
    */
   private evaluateAndTrade(): void {
     if (this.persisted.state !== 'running') return;
@@ -747,7 +735,7 @@ export class BotRunner {
     const allInds = calculateIndicators(this.bars);
     this.currentIndicators = allInds[allInds.length - 1] ?? this.currentIndicators;
 
-    if (this.handleMacdFlip()) return;
+    if (this.handleMacdExit()) return;
 
     if (this.handleStochDivergence(detectStochDivergence(this.bars))) return;
 
@@ -805,29 +793,29 @@ export class BotRunner {
   }
 
   /**
-   * MACD side-flip exit. Once the line crosses its signal, every managed trade
-   * is closed and entries pause until the book is flat. Returns true while the
-   * exit is active.
+   * MACD directional exit: while the line is above its signal, managed shorts
+   * are closed; while it is below, managed longs are closed. This is a state
+   * rule (not just a cross), so a position restored on the wrong side is closed
+   * on the next evaluation. Returns true on a bar where a mismatched side is
+   * still open, so entries wait for the next bar.
    */
-  private handleMacdFlip(): boolean {
+  private handleMacdExit(): boolean {
     const side = macdTrend(this.currentIndicators.macdLine, this.currentIndicators.macdSignal);
+    if (side !== 'bullish' && side !== 'bearish') return false;
 
-    if (isMacdFlip(this.lastMacdSide, side) && this.persisted.positions.length > 0) {
-      this.macdFlipExit = true;
-      this.log(
-        'signal',
-        `MACD flipped ${this.lastMacdSide?.toUpperCase()} -> ${side?.toUpperCase()} — closing ${this.persisted.positions.length} managed trade(s)`,
-      );
-    }
-    if (side === 'bullish' || side === 'bearish') this.lastMacdSide = side;
+    // Bullish MACD -> shorts are wrong; bearish MACD -> longs are wrong.
+    const target: 'buy' | 'sell' = side === 'bullish' ? 'sell' : 'buy';
+    const mismatched = this.persisted.positions.filter((p) => p.side === target);
+    if (mismatched.length === 0) return false;
 
-    if (!this.macdFlipExit) return false;
-    if (this.persisted.positions.length === 0) {
-      this.macdFlipExit = false;
-      return false;
-    }
-
-    this.closeManagedPositions('MACD flip exit');
+    const label = side === 'bullish' ? 'MACD bullish exit' : 'MACD bearish exit';
+    this.log(
+      'signal',
+      `MACD ${side.toUpperCase()} — closing ${mismatched.length} managed ${
+        target === 'sell' ? 'short' : 'long'
+      }(s)`,
+    );
+    this.closeManagedPositions(label, target);
     return true;
   }
 
